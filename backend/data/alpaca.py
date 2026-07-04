@@ -88,6 +88,20 @@ def get_option_snapshots(underlying, *, expiration_gte=None, expiration_lte=None
     return snapshots
 
 
+def get_clock(credentials=None, settings=None, session=None):
+    """
+    Market clock from the account host: is_open, next_open, next_close, timestamp.
+    Authoritative for holidays, unlike a weekday/time heuristic.
+    """
+    settings = settings or get_settings()
+    http = session or requests
+    url = f"{settings.account_url}/v2/clock"
+    resp = http.get(url, headers=_headers(credentials), timeout=15)
+    if resp.status_code != 200:
+        raise AlpacaError(f"clock -> HTTP {resp.status_code}: {resp.text[:200]}")
+    return resp.json()
+
+
 def get_stock_bars(symbol, *, start, end=None, timeframe="1Day", limit=1000,
                    feed="iex", credentials=None, settings=None, session=None):
     """

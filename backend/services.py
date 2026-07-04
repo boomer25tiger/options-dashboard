@@ -1,0 +1,393 @@
+"""
+Service layer: assemble page-ready responses from the data layer, analytics, the
+pricing engine, and the strategy math. The API routes stay thin and call these.
+
+All network fetches funnel through here so caching and error handling live in one
+place. Heavy chain pulls are cached briefly (the market data is last-session while
+closed, so a short TTL is safe and keeps tab-switching fast).
+"""
+import datetime as dt
+import os
+import sys
+import time
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+from pricing_engine import (  # noqa: E402
+    binomial_price, bs_price, breakeven_long_option, prob_itm,
+    prob_profit_long_option,
+)
+
+from backend.data import alpaca, dividends, normalize, rates, yfinance_client
+from backend.data.alpaca import AlpacaError
+from backend.data.yfinance_client import YFinanceError
+from backend import analytics, strategy
+
+_CHAIN_TTL = 180  # seconds
+_BARS_TTL = 900
+_CACHE = {}
+
+
+class DataUnavailable(RuntimeError):
+    """Raised when no source can satisfy a request."""
+
+
+class NotFound(RuntimeError):
+    """Raised when a specific contract cannot be located."""
+
+
+def _cached(key, ttl, producer):
+    now = time.time()
+    hit = _CACHE.get(key)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    value = producer()
+    _CACHE[key] = (now, value)
+    return value
+
+
+# ----------------------------------------------------------------------
+# Greek / contract serialization (display units per CLAUDE.md)
+# ----------------------------------------------------------------------
+GREEKS_UNITS = {
+    "delta": "per $1 spot", "gamma": "per $1 spot",
+    "vega": "per 1% vol", "theta": "per calendar day", "rho": "per 1% rate",
+}
+
+
+def greeks_display(g):
+    """Convert engine-native Greeks to display units (vega/100, theta/365, rho/100)."""
+    def scaled(v, factor):
+        return None if v is None else v / factor
+    return {
+        "delta": g.delta, "gamma": g.gamma,
+        "vega": scaled(g.vega, 100.0),
+        "theta": scaled(g.theta, 365.0),
+        "rho": scaled(g.rho, 100.0),
+    }
+
+
+def serialize_contract(c):
+    return {
+        "symbol": c.symbol, "type": c.option_type, "strike": c.strike,
+        "expiration": c.expiration.isoformat(),
+        "bid": c.bid, "ask": c.ask, "mid": c.mid, "last": c.last,
+        "volume": c.volume, "open_interest": c.open_interest,
+        "iv": c.iv, "iv_source": c.iv_source,
+        "greeks": greeks_display(c.greeks), "greeks_source": c.greeks_source,
+        "time_to_expiry": c.time_to_expiry, "rate_used": c.rate_used,
+        "quote_timestamp": c.quote_timestamp, "in_the_money": c.in_the_money,
+    }
+
+
+# ----------------------------------------------------------------------
+# Shared loaders
+# ----------------------------------------------------------------------
+def nearest_expiration_dates(ticker, n):
+    exp_strs = yfinance_client.get_expirations(ticker)
+    if not exp_strs:
+        raise DataUnavailable(f"no expirations available for {ticker}")
+    exp_strs = exp_strs[:n]
+    return [dt.date.fromisoformat(e) for e in exp_strs], exp_strs
+
+
+def _load_chain(ticker, exp_strs, exp_dates, iv_source, dividend_override,
+                strike_band=0.3):
+    key = ("chain", ticker, tuple(exp_strs), iv_source, dividend_override,
+           strike_band)
+
+    def produce():
+        now = dt.datetime.now(dt.timezone.utc)
+        today = now.date()
+        spot = yfinance_client.get_spot(ticker)
+
+        snaps = {}
+        if iv_source in ("auto", "alpaca") and exp_dates:
+            lo = spot * (1 - strike_band) if spot else None
+            hi = spot * (1 + strike_band) if spot else None
+            try:
+                snaps = alpaca.get_option_snapshots(
+                    ticker, expiration_gte=today, expiration_lte=exp_dates[-1],
+                    strike_gte=lo, strike_lte=hi, feed="indicative", limit=1000,
+                )
+            except AlpacaError:
+                snaps = {}
+
+        yf_by_exp = {}
+        if iv_source in ("auto", "yfinance"):
+            for exp_str, exp_date in zip(exp_strs, exp_dates):
+                try:
+                    calls, puts = yfinance_client.get_option_chain(ticker, exp_str)
+                    yf_by_exp[exp_date] = (calls, puts)
+                except YFinanceError:
+                    continue
+
+        rate_fn, rate_source, rate_points, rate_asof = rates.get_rate_curve()
+        q, q_source = dividends.resolve_dividend_yield(ticker, dividend_override)
+
+        chain = normalize.build_chain(
+            ticker, alpaca_snapshots=snaps, yfinance_by_expiration=yf_by_exp,
+            spot=spot, rate_fn=rate_fn, dividend_yield=q, dividend_source=q_source,
+            now=now, iv_source=iv_source,
+        )
+        meta = {
+            "as_of": now.isoformat(), "spot": spot,
+            "rate": {"source": rate_source, "as_of": rate_asof,
+                     "points": {str(k): v for k, v in (rate_points or {}).items()}},
+            "dividend": {"value": q, "source": q_source},
+            "iv_source": iv_source,
+        }
+        return chain, meta, rate_fn, now
+
+    return _cached(key, _CHAIN_TTL, produce)
+
+
+def _load_closes(ticker, days=420):
+    key = ("bars", ticker, days)
+
+    def produce():
+        today = dt.date.today()
+        bars = alpaca.get_stock_bars(ticker, start=today - dt.timedelta(days=days))
+        return [b["c"] for b in bars]
+
+    return _cached(key, _BARS_TTL, produce)
+
+
+# ----------------------------------------------------------------------
+# Endpoints
+# ----------------------------------------------------------------------
+def market_status():
+    try:
+        clock = alpaca.get_clock()
+        return {
+            "is_open": clock.get("is_open"),
+            "timestamp": clock.get("timestamp"),
+            "next_open": clock.get("next_open"),
+            "next_close": clock.get("next_close"),
+            "source": "alpaca",
+        }
+    except AlpacaError:
+        return {"is_open": None, "source": "unavailable"}
+
+
+def assumptions(ticker, dividend_override=None):
+    rate_fn, rate_source, rate_points, rate_asof = rates.get_rate_curve()
+    q, q_source = dividends.resolve_dividend_yield(ticker, dividend_override)
+    sample = {t: rate_fn(t) for t in (0.25, 1.0, 2.0, 5.0)}
+    return {
+        "ticker": ticker,
+        "rate": {"source": rate_source, "as_of": rate_asof,
+                 "points": {str(k): v for k, v in (rate_points or {}).items()},
+                 "sample": {str(k): v for k, v in sample.items()}},
+        "dividend": {"value": q, "source": q_source},
+    }
+
+
+def expirations(ticker):
+    exp_dates, exp_strs = nearest_expiration_dates(ticker, 60)
+    return {"ticker": ticker, "expirations": exp_strs}
+
+
+def chain_page(ticker, num_expirations=6, iv_source="auto", dividend_override=None):
+    exp_dates, exp_strs = nearest_expiration_dates(ticker, num_expirations)
+    chain, meta, _, _ = _load_chain(ticker, exp_strs, exp_dates, iv_source,
+                                    dividend_override)
+    iv_rank = None
+    try:
+        iv_rank = analytics.realized_vol_rank(_load_closes(ticker))
+    except AlpacaError:
+        iv_rank = None
+    return {
+        "ticker": ticker, "spot": chain.spot, "as_of": meta["as_of"],
+        "rate": meta["rate"], "dividend": meta["dividend"],
+        "iv_source": iv_source, "market": market_status(),
+        "expirations": [d.isoformat() for d in chain.expirations],
+        "iv_rank": iv_rank, "greeks_units": GREEKS_UNITS,
+        "contracts": [serialize_contract(c) for c in chain.contracts],
+    }
+
+
+def contract_detail(ticker, symbol, iv_source="auto", dividend_override=None):
+    underlying, exp, otype, strike = alpaca.parse_occ_symbol(symbol)
+    chain, meta, _, _ = _load_chain(ticker, [exp.isoformat()], [exp], iv_source,
+                                    dividend_override, strike_band=0.5)
+    match = next((c for c in chain.contracts if c.symbol == symbol), None)
+    if match is None:
+        match = next(
+            (c for c in chain.contracts
+             if c.option_type == otype and abs(c.strike - strike) < 1e-6
+             and c.expiration == exp),
+            None,
+        )
+    if match is None:
+        raise NotFound(f"contract {symbol} not found in chain")
+
+    S, K = chain.spot, match.strike
+    T, r, sigma = match.time_to_expiry, match.rate_used, match.iv
+    q = meta["dividend"]["value"]
+
+    bs = binom = early_ex = p_itm = pop = breakeven = None
+    if sigma and S and T and T > 0:
+        bs = bs_price(S, K, T, r, sigma, otype, q)
+        binom = binomial_price(S, K, T, r, sigma, otype, q, steps=200, american=True)
+        early_ex = binom - bs
+        p_itm = prob_itm(S, K, T, r, sigma, otype, q)
+        premium = match.mid if match.mid is not None else (match.last or bs)
+        if premium:
+            pop = prob_profit_long_option(S, K, T, r, sigma, otype, premium, q)
+            breakeven = breakeven_long_option(K, premium, otype)
+
+    return {
+        "symbol": symbol, "type": otype, "strike": K,
+        "expiration": exp.isoformat(), "spot": S,
+        "time_to_expiry": T, "rate_used": r, "iv": sigma, "dividend_yield": q,
+        "pricing": {
+            "black_scholes": bs, "binomial_american": binom,
+            "early_exercise_premium": early_ex,
+        },
+        "greeks": greeks_display(match.greeks), "greeks_units": GREEKS_UNITS,
+        "probability": {
+            "prob_itm": p_itm, "prob_of_profit": pop, "breakeven": breakeven,
+        },
+        "market_data": {
+            "bid": match.bid, "ask": match.ask, "mid": match.mid,
+            "last": match.last, "volume": match.volume,
+            "open_interest": match.open_interest, "iv_source": match.iv_source,
+            "quote_timestamp": match.quote_timestamp,
+        },
+        "as_of": meta["as_of"], "iv_source": iv_source,
+    }
+
+
+def realized_vs_implied(ticker):
+    closes = _load_closes(ticker)
+    if len(closes) < 20:
+        raise DataUnavailable(f"insufficient price history for {ticker}")
+    rv = analytics.realized_vol_windows(closes)
+    rank = analytics.realized_vol_rank(closes)
+    exp_dates, exp_strs = nearest_expiration_dates(ticker, 1)
+    chain, _, _, _ = _load_chain(ticker, exp_strs, exp_dates, "auto", None,
+                                 strike_band=0.3)
+    atm = analytics.atm_iv(chain)
+    return {
+        "ticker": ticker,
+        "realized_vol": {str(w): v for w, v in rv.items()},
+        "iv_rank": rank,
+        "atm_iv": atm,
+        "atm_expiration": exp_dates[0].isoformat(),
+        "spot": chain.spot,
+    }
+
+
+def surface(ticker, max_expirations=8, iv_source="auto"):
+    exp_dates, exp_strs = nearest_expiration_dates(ticker, max_expirations)
+    chain, meta, _, _ = _load_chain(ticker, exp_strs, exp_dates, iv_source, None,
+                                    strike_band=0.5)
+    return {
+        "ticker": ticker, "spot": chain.spot, "as_of": meta["as_of"],
+        "expirations": [d.isoformat() for d in chain.expirations],
+        "points": analytics.surface_points(chain),
+    }
+
+
+def smile(ticker, expiration_str, iv_source="auto"):
+    exp = dt.date.fromisoformat(expiration_str)
+    chain, meta, _, _ = _load_chain(ticker, [expiration_str], [exp], iv_source,
+                                    None, strike_band=0.5)
+    return {
+        "ticker": ticker, "expiration": expiration_str, "spot": chain.spot,
+        "as_of": meta["as_of"], "points": analytics.smile_points(chain, exp),
+    }
+
+
+# ----------------------------------------------------------------------
+# Strategy
+# ----------------------------------------------------------------------
+def _fill_leg_sigmas(legs, ticker, iv_source, dividend_override):
+    """Populate any option leg missing sigma from the live chain at its expiration."""
+    need = {leg.expiration for leg in legs
+            if leg.is_option() and leg.sigma is None and leg.expiration}
+    if not need:
+        return
+    lookup = {}
+    for exp in need:
+        try:
+            chain, _, _, _ = _load_chain(
+                ticker, [exp.isoformat()], [exp], iv_source, dividend_override,
+                strike_band=0.6,
+            )
+        except (AlpacaError, YFinanceError, DataUnavailable):
+            continue
+        for c in chain.contracts:
+            if c.iv:
+                lookup[(c.option_type, round(c.strike, 3), c.expiration)] = c.iv
+    for leg in legs:
+        if leg.is_option() and leg.sigma is None:
+            leg.sigma = lookup.get((leg.option_type, round(leg.strike, 3),
+                                    leg.expiration))
+
+
+def _valuation_dates(now, final_exp):
+    """now, two dates on the way to expiry, and the expiration itself."""
+    expiry_dt = dt.datetime(final_exp.year, final_exp.month, final_exp.day,
+                            20, 0, 0, tzinfo=dt.timezone.utc)
+    span = (expiry_dt - now).total_seconds()
+    dates = [("now", now)]
+    if span > 0:
+        for frac in (0.5, 0.85):
+            d = now + dt.timedelta(seconds=span * frac)
+            dates.append((d.date().isoformat(), d))
+    dates.append(("expiry", expiry_dt))
+    return dates
+
+
+def price_strategy(ticker, legs, iv_source="auto", dividend_override=None):
+    now = dt.datetime.now(dt.timezone.utc)
+    spot = yfinance_client.get_spot(ticker)
+    if not spot:
+        raise DataUnavailable(f"no spot price for {ticker}")
+    rate_fn, rate_source, _, rate_asof = rates.get_rate_curve()
+    q, q_source = dividends.resolve_dividend_yield(ticker, dividend_override)
+    ctx = strategy.MarketContext(spot=spot, now=now, rate_fn=rate_fn,
+                                 dividend_yield=q)
+
+    _fill_leg_sigmas(legs, ticker, iv_source, dividend_override)
+    missing = [i for i, leg in enumerate(legs)
+               if leg.is_option() and not leg.sigma]
+    if missing:
+        raise DataUnavailable(
+            f"no IV available for leg(s) {missing}; supply sigma or entry_price")
+
+    summary = strategy.summarize(legs, ctx)
+    final_exp = strategy._final_expiration(legs)
+    curves_payload = {}
+    xs = []
+    if final_exp:
+        labeled = _valuation_dates(now, final_exp)
+        xs, curves = strategy.payoff_curve(legs, ctx, [d for _, d in labeled])
+        for (label, d), series_key in zip(labeled, [d for _, d in labeled]):
+            curves_payload[label] = curves[series_key]
+
+    return {
+        "ticker": ticker, "spot": spot, "as_of": now.isoformat(),
+        "context": {"rate_source": rate_source, "rate_as_of": rate_asof,
+                    "dividend": {"value": q, "source": q_source},
+                    "iv_source": iv_source},
+        "summary": {
+            "net_cost": summary["net_cost"],
+            "greeks": {
+                "delta": summary["greeks"]["delta"],
+                "gamma": summary["greeks"]["gamma"],
+                "vega": summary["greeks"]["vega"] / 100.0,
+                "theta": summary["greeks"]["theta"] / 365.0,
+                "rho": summary["greeks"]["rho"] / 100.0,
+            },
+            "greeks_units": GREEKS_UNITS,
+            "breakevens": summary["breakevens"],
+            "max_profit": summary["max_profit"],
+            "max_loss": summary["max_loss"],
+            "prob_of_profit": summary["prob_of_profit"],
+        },
+        "payoff": {"underlying": xs, "curves": curves_payload},
+    }
