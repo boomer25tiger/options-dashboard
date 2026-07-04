@@ -38,6 +38,11 @@ def _time_to_expiry(expiration, now):
     return max(seconds, 0.0) / (_DAYS_PER_YEAR * 24 * 3600)
 
 
+def time_to_expiry(expiration, now):
+    """Public wrapper for the shared time-to-expiry convention (years, expiry ~16:00 ET)."""
+    return _time_to_expiry(expiration, now)
+
+
 def _mid(bid, ask):
     if bid is not None and ask is not None and bid > 0 and ask > 0:
         return 0.5 * (bid + ask)
