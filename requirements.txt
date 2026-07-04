@@ -1,0 +1,5 @@
+# Backend / data-layer dependencies. Python 3.11+ recommended.
+# The pricing engine itself is pure standard library and needs nothing here.
+requests>=2.31
+yfinance>=0.2.40
+pandas>=2.0
