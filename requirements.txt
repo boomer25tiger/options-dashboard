@@ -4,6 +4,10 @@ requests>=2.31
 yfinance>=0.2.40
 pandas>=2.0
 
+# Volatility-surface SVI calibration
+scipy>=1.11
+numpy>=1.24
+
 # API layer
 fastapi>=0.110
 uvicorn[standard]>=0.27

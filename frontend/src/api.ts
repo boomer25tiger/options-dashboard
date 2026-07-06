@@ -67,9 +67,23 @@ export interface Assumptions {
 }
 
 export interface SurfacePoint { strike: number; expiration: string; tenor: number; iv: number }
+export interface SviSlice {
+  expiration: string; tenor: number; ok: boolean
+  params?: { a: number; b: number; rho: number; m: number; sigma: number; rmse: number; n: number }
+  curve?: { strike: number; iv: number }[]
+}
+export interface ArbViolation {
+  type: 'butterfly' | 'calendar'; expiration: string; tenor: number
+  strike?: number; moneyness?: number; prior_expiration?: string
+  severity?: number; description: string
+}
+export interface TermPoint { expiration: string; tenor: number; atm_raw: number | null; atm_svi?: number | null }
 export interface SurfaceResponse {
   ticker: string; spot: number | null; as_of: string
   expirations: string[]; points: SurfacePoint[]
+  svi: { slices: SviSlice[] }
+  arbitrage: { violations: ArbViolation[]; counts: { butterfly: number; calendar: number }; truncated: boolean }
+  term_structure: { points: TermPoint[] }
 }
 
 export interface SmilePoint {

@@ -76,6 +76,7 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     queryFn: () => api.surface(ticker, ivSource, 12),
   })
   const c = plotColors()
+  const [sviOn, setSviOn] = useState(false)
 
   const grid = useMemo(() => {
     if (!data) return null
@@ -102,23 +103,63 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     return { strikes, tenors, z }
   }, [data])
 
+  const sviGrid = useMemo(() => {
+    if (!data) return null
+    const spot = data.spot ?? 0
+    const inBand = (K: number) => !spot || (K >= spot * 0.8 && K <= spot * 1.2)
+    const fitted = data.svi.slices.filter((s) => s.ok && s.curve && s.curve.length >= 2)
+    if (fitted.length < 2) return null
+    const allK = fitted.flatMap((s) => s.curve!.map((p) => p.strike)).filter(inBand)
+    if (allK.length < 2) return null
+    const lo = Math.min(...allK), hi = Math.max(...allK)
+    const N = 48
+    const strikes = Array.from({ length: N }, (_, i) => lo + ((hi - lo) * i) / (N - 1))
+    const tenors = fitted.map((s) => s.tenor)
+    const z = fitted.map((s) => strikes.map((K) => { const iv = lerp(s.curve!, K); return iv == null ? null : iv * 100 }))
+    return { strikes, tenors, z }
+  }, [data])
+
+  const rawScatter = useMemo(() => {
+    if (!data) return null
+    const spot = data.spot ?? 0
+    const pts = data.points.filter((p) => p.iv > 0 && p.iv <= 0.8 && (!spot || (p.strike >= spot * 0.8 && p.strike <= spot * 1.2)))
+    return { x: pts.map((p) => p.strike), y: pts.map((p) => p.tenor), z: pts.map((p) => p.iv * 100) }
+  }, [data])
+
   if (isLoading) return <Loading label={`Loading surface for ${ticker}…`} />
   if (isError) return <Failed error={error} />
+  if (!data) return null
   if (!grid) return <div className="chart-card"><div className="msg">Not enough surface data.</div></div>
 
-  const trace = {
-    type: 'surface',
-    x: grid.strikes, y: grid.tenors, z: grid.z,
-    colorscale: ivColorscale(), showscale: true, opacity: 1,
-    colorbar: {
-      title: { text: 'IV %', side: 'right' }, titlefont: { color: c.muted },
-      tickfont: { color: c.muted }, outlinecolor: c.grid, thickness: 12, len: 0.6,
-    },
+  const colorbar = {
+    title: { text: 'IV %', side: 'right' }, titlefont: { color: c.muted },
+    tickfont: { color: c.muted }, outlinecolor: c.grid, thickness: 12, len: 0.6,
+  }
+  const rawSurface = {
+    type: 'surface', x: grid.strikes, y: grid.tenors, z: grid.z,
+    colorscale: ivColorscale(), showscale: true, opacity: 1, colorbar,
     contours: { z: { show: true, usecolormap: true, width: 1.5 } },
     lighting: { ambient: 0.8, diffuse: 0.5, specular: 0.08, roughness: 0.85, fresnel: 0.1 },
     lightposition: { x: 100, y: 200, z: 350 },
     hovertemplate: 'K %{x:.0f}<br>T %{y:.3f}y<br>IV %{z:.1f}%<extra></extra>',
   }
+  const sviSurface = sviGrid ? {
+    type: 'surface', x: sviGrid.strikes, y: sviGrid.tenors, z: sviGrid.z,
+    colorscale: ivColorscale(), showscale: true, opacity: 0.82, colorbar,
+    contours: { z: { show: true, usecolormap: true, width: 1.5 } },
+    lighting: { ambient: 0.85, diffuse: 0.45, specular: 0.06, roughness: 0.9 },
+    lightposition: { x: 100, y: 200, z: 350 },
+    hovertemplate: 'K %{x:.0f}<br>T %{y:.3f}y<br>IV %{z:.1f}% (fit)<extra></extra>',
+  } : null
+  const rawPts = rawScatter ? {
+    type: 'scatter3d', mode: 'markers', x: rawScatter.x, y: rawScatter.y, z: rawScatter.z,
+    marker: { size: 1.8, color: c.text, opacity: 0.55 },
+    hovertemplate: 'K %{x:.0f}<br>T %{y:.3f}y<br>IV %{z:.1f}% (raw)<extra></extra>',
+  } : null
+
+  const showSvi = sviOn && !!sviSurface
+  const traces = showSvi ? [sviSurface, rawPts].filter(Boolean) : [rawSurface]
+
   const axis = {
     color: c.muted, gridcolor: c.grid, zerolinecolor: c.grid,
     showbackground: false, showspikes: false, tickfont: { color: c.muted },
@@ -134,12 +175,27 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
       aspectratio: { x: 1.6, y: 0.9, z: 0.6 },
     },
   }
+  const fittedCount = data.svi.slices.filter((s) => s.ok).length
+  const totalSlices = data.svi.slices.length
+
   return (
     <div className="chart-card">
-      <Plot key={themeKey} data={[trace]} layout={layout} config={plotConfig}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+        <button className={`btn ${sviOn ? 'accent' : ''}`} onClick={() => setSviOn((v) => !v)}>
+          SVI fit overlay {sviOn ? 'on' : 'off'}
+        </button>
+        {sviOn && (
+          <span className="dim" style={{ fontSize: 12 }}>
+            {sviGrid ? `Fitted ${fittedCount} of ${totalSlices} slices${fittedCount < totalSlices ? ' (sparse slices hidden)' : ''}` : 'SVI fit unavailable for this chain'}
+          </span>
+        )}
+      </div>
+      <Plot key={themeKey + (showSvi ? '-svi' : '')} data={traces} layout={layout} config={plotConfig}
         style={{ width: '100%', height: 580 }} useResizeHandler />
       <div className="chart-note">
-        IV across strike and expiration (near-money band), linearly interpolated to a grid with contour lines. Drag to rotate, scroll to zoom.
+        {showSvi
+          ? 'SVI-fitted surface (continuous mesh) with the raw market IV points scattered on top. A point sitting off the mesh flags a data problem or a genuine dislocation; slices that fail to calibrate are hidden.'
+          : 'Raw IV across strike and expiration (near-money band), interpolated to a grid with contour lines. Toggle the SVI fit for a calibrated overlay. Drag to rotate, scroll to zoom.'}
       </div>
     </div>
   )

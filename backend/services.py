@@ -24,6 +24,7 @@ from backend.data import alpaca, dividends, normalize, rates, yfinance_client
 from backend.data.alpaca import AlpacaError
 from backend.data.yfinance_client import YFinanceError
 from backend import analytics, strategy
+from backend import surface as surface_mod
 from backend.storage import db
 
 _CHAIN_TTL = 180  # seconds
@@ -305,12 +306,24 @@ def realized_vs_implied(ticker):
 
 def surface(ticker, max_expirations=8, iv_source="auto"):
     exp_dates, exp_strs = nearest_expiration_dates(ticker, max_expirations)
-    chain, meta, _, _ = _load_chain(ticker, exp_strs, exp_dates, iv_source, None,
-                                    strike_band=0.5)
+    chain, meta, rate_fn, now = _load_chain(ticker, exp_strs, exp_dates, iv_source,
+                                            None, strike_band=0.5)
+    spot = chain.spot
+    q = meta["dividend"]["value"]
+    forwards = {}
+    for exp in chain.expirations:
+        T = normalize.time_to_expiry(exp, now)
+        forwards[exp] = (spot * math.exp((rate_fn(T) - q) * T)
+                         if (spot and T > 0) else spot)
+
+    svi = surface_mod.svi_surface(chain, forwards)
+    arb = surface_mod.arbitrage(chain, forwards, spot, rate_fn, q)
+    term = surface_mod.atm_term_structure(chain, forwards, svi)
     return {
-        "ticker": ticker, "spot": chain.spot, "as_of": meta["as_of"],
+        "ticker": ticker, "spot": spot, "as_of": meta["as_of"],
         "expirations": [d.isoformat() for d in chain.expirations],
         "points": analytics.surface_points(chain),
+        "svi": svi, "arbitrage": arb, "term_structure": term,
     }
 
 
