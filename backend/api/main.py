@@ -6,8 +6,11 @@ issues. During development the React app runs on a separate port and is allowed
 through CORS; in the packaged build the backend serves the built frontend from the
 same origin (added in the launch phase).
 """
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from backend import services, strategy
 from backend.api.schemas import StrategyLeg, StrategyRequest, VisitRequest
@@ -137,3 +140,21 @@ def history_series(tickers: str, metric: str = "atm_iv"):
     if not tlist:
         raise HTTPException(status_code=400, detail="no tickers supplied")
     return _guard(services.history_series, tlist, metric)
+
+
+# --- Serve the built React app (same origin) when a production build exists. ---
+# Declared after the /api routes so those always take precedence. The catch-all
+# returns index.html for unmatched paths so react-router deep links and page
+# refreshes resolve client-side. Absent a build (development), this stays off and
+# the Vite dev server serves the UI on its own port.
+_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+if _DIST.is_dir():
+    @app.get("/{full_path:path}")
+    def spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="not found")
+        candidate = (_DIST / full_path).resolve()
+        if full_path and candidate.is_file() and _DIST in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(_DIST / "index.html")
