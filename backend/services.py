@@ -460,6 +460,7 @@ def price_strategy(ticker, legs, iv_source="auto", dividend_override=None):
             "max_loss": summary["max_loss"],
             "prob_of_profit": summary["prob_of_profit"],
         },
+        "legs": strategy.leg_breakdown(legs, ctx),
         "payoff": {"underlying": xs, "curves": curves_payload},
     }
 

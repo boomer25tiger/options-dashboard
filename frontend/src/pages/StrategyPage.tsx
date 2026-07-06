@@ -19,12 +19,26 @@ function nearestStrike(strikes: number[], target: number): number | null {
   return strikes.reduce((b, s) => (Math.abs(s - target) < Math.abs(b - target) ? s : b), strikes[0])
 }
 
+function legLabel(r: StrategyResponse['legs'][number]): string {
+  const q = (r.quantity > 0 ? '+' : '') + r.quantity
+  if (r.option_type === 'stock') return `${q} Stock`
+  const t = r.option_type[0].toUpperCase() + r.option_type.slice(1)
+  return `${q} ${t} ${r.strike}`
+}
+
+const PRESET_GROUPS = ['Directional', 'Neutral / income', 'Hedged']
 const PRESETS = [
-  { key: 'bull_call', nm: 'Bull call spread', ds: 'Long ATM call, short a higher call' },
-  { key: 'bear_put', nm: 'Bear put spread', ds: 'Long ATM put, short a lower put' },
-  { key: 'straddle', nm: 'Long straddle', ds: 'Long the ATM call and put' },
-  { key: 'strangle', nm: 'Long strangle', ds: 'Long an OTM call and OTM put' },
-  { key: 'iron_condor', nm: 'Iron condor', ds: 'Short strangle inside long wings' },
+  { key: 'bull_call', nm: 'Bull call spread', ds: 'Long ATM call, short a higher call', group: 'Directional' },
+  { key: 'bear_put', nm: 'Bear put spread', ds: 'Long ATM put, short a lower put', group: 'Directional' },
+  { key: 'bull_put', nm: 'Bull put spread', ds: 'Short a higher put, long a lower put (credit)', group: 'Directional' },
+  { key: 'bear_call', nm: 'Bear call spread', ds: 'Short a lower call, long a higher call (credit)', group: 'Directional' },
+  { key: 'straddle', nm: 'Long straddle', ds: 'Long the ATM call and put', group: 'Neutral / income' },
+  { key: 'strangle', nm: 'Long strangle', ds: 'Long an OTM call and OTM put', group: 'Neutral / income' },
+  { key: 'iron_condor', nm: 'Iron condor', ds: 'Short strangle inside long wings', group: 'Neutral / income' },
+  { key: 'butterfly', nm: 'Long call butterfly', ds: 'Pinned to the middle strike', group: 'Neutral / income' },
+  { key: 'covered_call', nm: 'Covered call', ds: 'Long 100 shares, short an OTM call', group: 'Hedged' },
+  { key: 'protective_put', nm: 'Protective put', ds: 'Long 100 shares, long an OTM put', group: 'Hedged' },
+  { key: 'collar', nm: 'Collar', ds: 'Shares, long a put, short a call', group: 'Hedged' },
 ]
 
 function buildPreset(key: string, exp: string, strikes: number[], spot: number): Leg[] {
@@ -33,13 +47,20 @@ function buildPreset(key: string, exp: string, strikes: number[], spot: number):
   const K = (t: number) => nearestStrike(strikes, t)
   const call = (side: Side, k: number | null) => newLeg({ side, type: 'call', strike: k, expiration: exp })
   const put = (side: Side, k: number | null) => newLeg({ side, type: 'put', strike: k, expiration: exp })
+  const stock = (qty: number) => newLeg({ side: 'buy', type: 'stock', quantity: qty, strike: null, expiration: null })
   const atm = K(spot)
   switch (key) {
     case 'bull_call': return [call('buy', atm), call('sell', K(spot + w))]
     case 'bear_put': return [put('buy', atm), put('sell', K(spot - w))]
+    case 'bull_put': return [put('sell', K(spot - w)), put('buy', K(spot - w2))]
+    case 'bear_call': return [call('sell', K(spot + w)), call('buy', K(spot + w2))]
     case 'straddle': return [call('buy', atm), put('buy', atm)]
     case 'strangle': return [call('buy', K(spot + w)), put('buy', K(spot - w))]
     case 'iron_condor': return [put('sell', K(spot - w)), put('buy', K(spot - w2)), call('sell', K(spot + w)), call('buy', K(spot + w2))]
+    case 'butterfly': return [call('buy', K(spot - w)), newLeg({ side: 'sell', type: 'call', strike: atm, expiration: exp, quantity: 2 }), call('buy', K(spot + w))]
+    case 'covered_call': return [stock(100), call('sell', K(spot + w))]
+    case 'protective_put': return [stock(100), put('buy', K(spot - w))]
+    case 'collar': return [stock(100), put('buy', K(spot - w)), call('sell', K(spot + w))]
     default: return []
   }
 }
@@ -115,14 +136,19 @@ export default function StrategyPage() {
               {expirations.map((ex) => <option key={ex} value={ex}>{ex}</option>)}
             </select>
           </div>
-          <div className="preset-grid">
-            {PRESETS.map((p) => (
-              <button className="preset-btn" key={p.key} onClick={() => applyPreset(p.key)}>
-                <div className="nm">{p.nm}</div>
-                <div className="ds">{p.ds}</div>
-              </button>
-            ))}
-          </div>
+          {PRESET_GROUPS.map((grp) => (
+            <div key={grp}>
+              <div className="preset-group">{grp}</div>
+              <div className="preset-grid">
+                {PRESETS.filter((p) => p.group === grp).map((p) => (
+                  <button className="preset-btn" key={p.key} onClick={() => applyPreset(p.key)}>
+                    <div className="nm">{p.nm}</div>
+                    <div className="ds">{p.ds}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -249,6 +275,45 @@ function StrategyResult({ data }: { data: StrategyResponse }) {
         <div className="chart-note">
           Time-aware payoff: the bold line is P&amp;L at expiry, the dotted lines are P&amp;L at earlier dates priced through the engine. Green is profit, red is loss; dashed verticals are breakevens.
         </div>
+      </div>
+
+      <div className="section-h" style={{ marginTop: 16 }}>Per-leg breakdown</div>
+      <div className="table-wrap" style={{ maxHeight: 'none', marginBottom: 8 }}>
+        <table className="breakdown">
+          <thead>
+            <tr>
+              <th className="l">Leg</th><th>Price</th><th>Cost</th>
+              <th>Δ</th><th>Γ</th><th>Vega</th><th>Θ/day</th><th>Rho</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.legs.map((r, i) => (
+              <tr key={i}>
+                <td className="l">{legLabel(r)}</td>
+                <td>{money(r.price)}</td>
+                <td>{money(r.cost)}</td>
+                <td>{greek(r.greeks.delta, 1)}</td>
+                <td>{greek(r.greeks.gamma, 3)}</td>
+                <td>{greek(r.greeks.vega, 1)}</td>
+                <td>{greek(r.greeks.theta, 1)}</td>
+                <td>{greek(r.greeks.rho, 1)}</td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td className="l">Net position</td>
+              <td></td>
+              <td>{money(s.net_cost)}</td>
+              <td>{greek(g.delta, 1)}</td>
+              <td>{greek(g.gamma, 3)}</td>
+              <td>{greek(g.vega, 1)}</td>
+              <td>{greek(g.theta, 1)}</td>
+              <td>{greek(g.rho, 1)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="note">
+        Net cost and net Greeks are the signed sum of the legs above, shown in the totals row. Breakevens, max profit and loss, and probability of profit are not per-leg sums; they come from the shape of the combined payoff. For a vertical, for example, max profit is the strike width minus the net debit, and the breakeven is the long strike plus the net debit.
       </div>
     </div>
   )

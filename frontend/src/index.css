@@ -319,6 +319,21 @@ table.chain td.neg { color: var(--neg); }
 .preset-btn .nm { font-size: 13px; font-weight: 600; color: var(--text); }
 .preset-btn .ds { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .builder-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.preset-group { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted); font-weight: 600; margin: 12px 0 8px; }
+.preset-group:first-child { margin-top: 0; }
+
+table.breakdown { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.breakdown th { text-align: right; padding: 7px 12px; font-size: 9.5px;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  border-bottom: 1px solid var(--border-strong); font-weight: 600; white-space: nowrap; }
+table.breakdown th.l { text-align: left; }
+table.breakdown td { text-align: right; padding: 6px 12px; font-family: var(--mono);
+  font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.breakdown td.l { text-align: left; }
+table.breakdown tr.total td { border-top: 1px solid var(--border-strong);
+  border-bottom: none; font-weight: 700; color: var(--text); }
+table.breakdown tr.total td.l { color: var(--text-muted); }
 
 .placeholder { display: flex; flex-direction: column; align-items: center;
   justify-content: center; height: 60vh; color: var(--text-muted); gap: 8px; }

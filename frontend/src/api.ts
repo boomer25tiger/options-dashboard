@@ -158,6 +158,16 @@ export interface StrategyResponse {
     max_loss: number | null
     prob_of_profit: number | null
   }
+  legs: Array<{
+    option_type: 'call' | 'put' | 'stock'
+    quantity: number
+    strike: number | null
+    expiration: string | null
+    sigma: number | null
+    price: number
+    cost: number
+    greeks: Greeks
+  }>
   payoff: { underlying: number[]; curves: Record<string, number[]> }
 }
 

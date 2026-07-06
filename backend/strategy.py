@@ -281,3 +281,39 @@ def summarize(legs, ctx):
         "max_loss": ml,
         "prob_of_profit": prob_of_profit(legs, ctx),
     }
+
+
+def leg_breakdown(legs, ctx):
+    """
+    Per-leg price, signed dollar cost, and signed Greek contributions in display
+    units. The cost column sums to the position's net cost and the Greek columns
+    sum to the net Greeks, which makes the aggregation explicit. (Breakevens, max
+    profit/loss and probability are NOT per-leg sums; they come from the combined
+    payoff, so they are not decomposed here.)
+    """
+    rows = []
+    for leg in legs:
+        scale = leg.quantity * leg.multiplier
+        entry = leg_entry(leg, ctx)
+        if leg.option_type == "stock":
+            g = {"delta": float(scale), "gamma": 0.0, "vega": 0.0, "theta": 0.0, "rho": 0.0}
+        else:
+            T = _leg_T(leg, ctx.now)
+            if T and T > 0 and leg.sigma:
+                raw = bs_greeks(ctx.spot, leg.strike, T, ctx.rate_fn(T), leg.sigma,
+                                leg.option_type, ctx.dividend_yield)
+                g = {k: scale * raw[k] for k in ("delta", "gamma", "vega", "theta", "rho")}
+            else:
+                g = {"delta": 0.0, "gamma": 0.0, "vega": 0.0, "theta": 0.0, "rho": 0.0}
+        rows.append({
+            "option_type": leg.option_type, "quantity": leg.quantity,
+            "strike": leg.strike,
+            "expiration": leg.expiration.isoformat() if leg.expiration else None,
+            "sigma": leg.sigma, "price": entry, "cost": scale * entry,
+            "greeks": {  # display units, per CLAUDE.md (vega/100, theta/365, rho/100)
+                "delta": g["delta"], "gamma": g["gamma"],
+                "vega": g["vega"] / 100.0, "theta": g["theta"] / 365.0,
+                "rho": g["rho"] / 100.0,
+            },
+        })
+    return rows

@@ -9,8 +9,8 @@ import sys
 
 from pricing_engine import bs_greeks, bs_price, prob_profit_long_option
 from backend.strategy import (
-    Leg, MarketContext, breakevens, max_profit_loss, payoff_curve,
-    position_greeks, prob_of_profit, summarize, time_to_expiry,
+    Leg, MarketContext, breakevens, leg_breakdown, max_profit_loss, net_cost,
+    payoff_curve, position_greeks, prob_of_profit, summarize, time_to_expiry,
 )
 
 _PASSES, _FAILS = [], []
@@ -176,6 +176,20 @@ def main():
           f"{round(pnl_exp,2)} vs {round(-prem*MULT,2)}")
     check("before expiry, ATM value has time premium (P&L > expiry P&L)",
           pnl_mid > pnl_exp + 1.0, f"mid={round(pnl_mid,2)} > exp={round(pnl_exp,2)}")
+
+    # -- Leg breakdown reconciles to the aggregate ---------------------
+    hr("LEG BREAKDOWN RECONCILES TO AGGREGATE")
+    legs = [call_leg(100, +1), call_leg(110, -1), put_leg(95, -1)]
+    rows = leg_breakdown(legs, CTX)
+    pg = position_greeks(legs, CTX)  # native units
+    check("leg costs sum to net cost",
+          approx(sum(r["cost"] for r in rows), net_cost(legs, CTX), 1e-6))
+    check("leg delta contributions sum to net delta",
+          approx(sum(r["greeks"]["delta"] for r in rows), pg["delta"], 1e-6))
+    check("leg vega (display) sums to net vega / 100",
+          approx(sum(r["greeks"]["vega"] for r in rows), pg["vega"] / 100.0, 1e-6))
+    check("leg theta (display) sums to net theta / 365",
+          approx(sum(r["greeks"]["theta"] for r in rows), pg["theta"] / 365.0, 1e-6))
 
     # -- Summary --------------------------------------------------------
     hr("SUMMARY")
