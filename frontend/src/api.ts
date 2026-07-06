@@ -107,6 +107,37 @@ export interface RealizedVsImplied {
 
 export interface ExpirationsResponse { ticker: string; expirations: string[] }
 
+export interface ContractDetail {
+  symbol: string
+  type: 'call' | 'put'
+  strike: number
+  expiration: string
+  spot: number | null
+  time_to_expiry: number | null
+  rate_used: number | null
+  iv: number | null
+  dividend_yield: number | null
+  pricing: {
+    black_scholes: number | null
+    binomial_american: number | null
+    early_exercise_premium: number | null
+  }
+  greeks: Greeks
+  greeks_units: Record<string, string>
+  probability: {
+    prob_itm: number | null
+    prob_of_profit: number | null
+    breakeven: number | null
+  }
+  market_data: {
+    bid: number | null; ask: number | null; mid: number | null; last: number | null
+    volume: number | null; open_interest: number | null
+    iv_source: string | null; quote_timestamp: string | null
+  }
+  as_of: string
+  iv_source: string
+}
+
 async function get<T>(path: string, params: Record<string, string | number | undefined>): Promise<T> {
   const q = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -133,4 +164,6 @@ export const api = {
     get<SmileResponse>('analysis/smile', { ticker, expiration, iv_source: ivSource }),
   realizedVsImplied: (ticker: string) =>
     get<RealizedVsImplied>('analysis/realized-vs-implied', { ticker }),
+  contract: (ticker: string, symbol: string, ivSource: string) =>
+    get<ContractDetail>('contract', { ticker, symbol, iv_source: ivSource }),
 }

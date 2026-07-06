@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import TopBar from './components/TopBar'
 import ChainPage from './pages/ChainPage'
 import AnalysisPage from './pages/AnalysisPage'
+import ContractPage from './pages/ContractPage'
 import Placeholder from './pages/Placeholder'
 
 const PAGES = [
@@ -31,10 +32,7 @@ export default function App() {
           path="/strategy"
           element={<Placeholder title="Strategy" sub="Multi-leg builder, presets, and the time-aware payoff" />}
         />
-        <Route
-          path="/contract"
-          element={<Placeholder title="Contract" sub="Black-Scholes vs binomial, probability and breakeven" />}
-        />
+        <Route path="/contract" element={<ContractPage />} />
         <Route
           path="/history"
           element={<Placeholder title="History" sub="Past visits, any metric over time, cross-ticker compare" />}
