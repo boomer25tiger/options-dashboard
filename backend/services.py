@@ -145,15 +145,19 @@ def _load_chain(ticker, exp_strs, exp_dates, iv_source, dividend_override,
     return _cached(key, _CHAIN_TTL, produce)
 
 
-def _load_closes(ticker, days=420):
+def _load_bars(ticker, days=560):
+    """Daily OHLC bars, enough history for a 60-day vol cone over a year."""
     key = ("bars", ticker, days)
 
     def produce():
         today = dt.date.today()
-        bars = alpaca.get_stock_bars(ticker, start=today - dt.timedelta(days=days))
-        return [b["c"] for b in bars]
+        return alpaca.get_stock_bars(ticker, start=today - dt.timedelta(days=days))
 
     return _cached(key, _BARS_TTL, produce)
+
+
+def _load_closes(ticker):
+    return [b["c"] for b in _load_bars(ticker)]
 
 
 # ----------------------------------------------------------------------
@@ -263,22 +267,39 @@ def contract_detail(ticker, symbol, iv_source="auto", dividend_override=None):
 
 
 def realized_vs_implied(ticker):
-    closes = _load_closes(ticker)
+    bars = _load_bars(ticker)
+    closes = [b["c"] for b in bars]
     if len(closes) < 20:
         raise DataUnavailable(f"insufficient price history for {ticker}")
-    rv = analytics.realized_vol_windows(closes)
+
+    cc = analytics.realized_vol_windows(closes)      # close-to-close
+    gk = analytics.garman_klass_windows(bars)        # Garman-Klass (primary)
     rank = analytics.realized_vol_rank(closes)
+    cone = analytics.vol_cone(bars)
+    divergence = analytics.gk_cc_divergence(gk, cc, window=20)
+
     exp_dates, exp_strs = nearest_expiration_dates(ticker, 1)
     chain, _, _, _ = _load_chain(ticker, exp_strs, exp_dates, "auto", None,
                                  strike_band=0.3)
     atm = analytics.atm_iv(chain)
+
+    # Volatility risk premium: ATM implied vs 20-day realized (Garman-Klass, the
+    # primary measure). Spread in vol points and the implied/realized ratio.
+    gk20 = gk.get(20)
+    vrp = None
+    if atm and gk20:
+        vrp = {"spread": atm - gk20, "ratio": atm / gk20, "basis": "gk_20"}
+
     return {
-        "ticker": ticker,
-        "realized_vol": {str(w): v for w, v in rv.items()},
+        "ticker": ticker, "spot": chain.spot,
+        "atm_iv": atm, "atm_expiration": exp_dates[0].isoformat(),
+        "realized_vol": {str(w): v for w, v in gk.items()},        # primary = GK
+        "realized_vol_gk": {str(w): v for w, v in gk.items()},
+        "realized_vol_cc": {str(w): v for w, v in cc.items()},
         "iv_rank": rank,
-        "atm_iv": atm,
-        "atm_expiration": exp_dates[0].isoformat(),
-        "spot": chain.spot,
+        "vrp": vrp,
+        "divergence": divergence,
+        "cone": cone,
     }
 
 

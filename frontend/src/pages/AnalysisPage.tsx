@@ -8,6 +8,9 @@ import { baseLayout, plotColors, ivColorscale, cssVar, plotConfig } from '../plo
 
 type Tab = 'surface' | 'smile' | 'realized'
 
+// Linear interpolation of a sorted [strike, iv] smile onto an arbitrary strike.
+// This is the only interpolation used and it is structural: a 3D surface needs a
+// grid, and the market only quotes discrete strikes. No smoothing is applied.
 function lerp(pts: { strike: number; iv: number }[], x: number): number | null {
   if (pts.length === 0 || x < pts[0].strike || x > pts[pts.length - 1].strike) return null
   for (let i = 1; i < pts.length; i++) {
@@ -18,42 +21,6 @@ function lerp(pts: { strike: number; iv: number }[], x: number): number | null {
     }
   }
   return pts[pts.length - 1].iv
-}
-
-// 3-point moving average along a row (over defined values).
-function smoothRow(row: (number | null)[]): (number | null)[] {
-  return row.map((v, i) => {
-    if (v == null) return null
-    const w = [row[i - 1], v, row[i + 1]].filter((x): x is number => x != null)
-    return w.reduce((s, x) => s + x, 0) / w.length
-  })
-}
-
-// Clean one expiration's smile: drop spikes that deviate sharply from neighbours,
-// then a rolling median to tame stale-quote runs. Shared by the smile and surface.
-function cleanSmile(sorted: { strike: number; iv: number }[]): { strike: number; iv: number }[] {
-  const deSpiked = sorted.filter((p, i) => {
-    if (i === 0 || i === sorted.length - 1) return true
-    const nb = (sorted[i - 1].iv + sorted[i + 1].iv) / 2
-    return Math.abs(p.iv - nb) < nb * 0.5
-  })
-  const w = 2
-  return deSpiked.map((p, i) => {
-    const win = deSpiked.slice(Math.max(0, i - w), i + w + 1).map((x) => x.iv).sort((a, b) => a - b)
-    return { strike: p.strike, iv: win[Math.floor(win.length / 2)] }
-  })
-}
-
-// Smooth a grid across rows (tenor) at each column, so the surface is not ridged
-// between adjacent expirations.
-function smoothCols(z: (number | null)[][]): (number | null)[][] {
-  return z.map((row, i) =>
-    row.map((v, j) => {
-      if (v == null) return null
-      const w = [z[i - 1]?.[j], v, z[i + 1]?.[j]].filter((x): x is number => x != null)
-      return w.reduce((s, x) => s + x, 0) / w.length
-    }),
-  )
 }
 
 function volPts(x: number | null | undefined): string {
@@ -116,7 +83,6 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     const byTenor = new Map<number, { strike: number; iv: number }[]>()
     for (const p of data.points) {
       if (!(p.iv > 0 && p.iv <= 0.8)) continue
-      if (p.tenor < 0.008) continue // skip 0-1 DTE rows; their IV is unreliable
       if (spot && (p.strike < spot * 0.8 || p.strike > spot * 1.2)) continue
       const arr = byTenor.get(p.tenor) ?? []
       arr.push({ strike: p.strike, iv: p.iv })
@@ -124,17 +90,15 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     }
     const tenors = [...byTenor.keys()].sort((a, b) => a - b)
     if (tenors.length < 2) return null
-    const cleaned = new Map<number, { strike: number; iv: number }[]>()
-    for (const t of tenors) cleaned.set(t, cleanSmile(byTenor.get(t)!.sort((a, b) => a.strike - b.strike)))
-    const all = [...cleaned.values()].flat().map((p) => p.strike)
+    for (const t of tenors) byTenor.get(t)!.sort((a, b) => a.strike - b.strike)
+    const all = [...byTenor.values()].flat().map((p) => p.strike)
     const lo = Math.min(...all), hi = Math.max(...all)
-    const N = 56
+    const N = 48
     const strikes = Array.from({ length: N }, (_, i) => lo + ((hi - lo) * i) / (N - 1))
-    let z = tenors.map((t) => {
-      const pts = cleaned.get(t)!
+    const z = tenors.map((t) => {
+      const pts = byTenor.get(t)!
       return strikes.map((s) => { const v = lerp(pts, s); return v == null ? null : v * 100 })
     })
-    for (let pass = 0; pass < 3; pass++) { z = z.map(smoothRow); z = smoothCols(z) }
     return { strikes, tenors, z }
   }, [data])
 
@@ -146,8 +110,12 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     type: 'surface',
     x: grid.strikes, y: grid.tenors, z: grid.z,
     colorscale: ivColorscale(), showscale: true, opacity: 1,
-    colorbar: { title: 'IV %', tickfont: { color: c.muted }, outlinecolor: c.grid, thickness: 10, len: 0.55 },
-    lighting: { ambient: 0.85, diffuse: 0.45, specular: 0.05, roughness: 0.9, fresnel: 0.1 },
+    colorbar: {
+      title: { text: 'IV %', side: 'right' }, titlefont: { color: c.muted },
+      tickfont: { color: c.muted }, outlinecolor: c.grid, thickness: 12, len: 0.6,
+    },
+    contours: { z: { show: true, usecolormap: true, width: 1.5 } },
+    lighting: { ambient: 0.8, diffuse: 0.5, specular: 0.08, roughness: 0.85, fresnel: 0.1 },
     lightposition: { x: 100, y: 200, z: 350 },
     hovertemplate: 'K %{x:.0f}<br>T %{y:.3f}y<br>IV %{z:.1f}%<extra></extra>',
   }
@@ -162,8 +130,8 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
       xaxis: { ...axis, title: { text: 'Strike' } },
       yaxis: { ...axis, title: { text: 'Tenor (yrs)' } },
       zaxis: { ...axis, title: { text: 'IV %' } },
-      camera: { eye: { x: 1.45, y: -1.75, z: 0.42 } },
-      aspectratio: { x: 1.7, y: 0.9, z: 0.55 },
+      camera: { eye: { x: 1.5, y: -1.7, z: 0.5 } },
+      aspectratio: { x: 1.6, y: 0.9, z: 0.6 },
     },
   }
   return (
@@ -171,7 +139,7 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
       <Plot key={themeKey} data={[trace]} layout={layout} config={plotConfig}
         style={{ width: '100%', height: 580 }} useResizeHandler />
       <div className="chart-note">
-        IV interpolated across strike and expiration (near-money band), smoothed. Drag to rotate, scroll to zoom.
+        IV across strike and expiration (near-money band), linearly interpolated to a grid with contour lines. Drag to rotate, scroll to zoom.
       </div>
     </div>
   )
@@ -182,8 +150,6 @@ function SmileTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: st
   const [exp, setExp] = useState<string | null>(null)
   useEffect(() => {
     if (exps.data && (!exp || !exps.data.expirations.includes(exp))) {
-      // Default to the first expiration at least a week out; the nearest ones are
-      // near-expiry and their skew metrics are undefined.
       const list = exps.data.expirations
       const soon = list.find((e) => (Date.parse(e) - Date.now()) / 86400000 >= 7)
       setExp(soon ?? list[0] ?? null)
@@ -197,14 +163,14 @@ function SmileTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: st
   })
   const c = plotColors()
 
+  // The actual per-strike implied vols, no smoothing. One value per strike.
   const pts = useMemo(() => {
     if (!smile.data) return [] as { strike: number; iv: number }[]
     const m = new Map<number, number>()
     for (const p of smile.data.points) {
-      if (p.iv > 0.02 && p.iv <= 1.0 && !m.has(p.strike)) m.set(p.strike, p.iv)
+      if (p.iv > 0 && !m.has(p.strike)) m.set(p.strike, p.iv)
     }
-    const raw = [...m.entries()].sort((a, b) => a[0] - b[0]).map(([strike, iv]) => ({ strike, iv }))
-    return cleanSmile(raw)
+    return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([strike, iv]) => ({ strike, iv }))
   }, [smile.data])
 
   const d = smile.data
@@ -218,7 +184,7 @@ function SmileTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: st
   const smileTrace = {
     type: 'scatter', mode: 'lines', name: 'Market smile',
     x: strikes, y: pts.map((p) => p.iv * 100),
-    line: { color: c.accent, width: 2.5, shape: 'spline', smoothing: 1.0 },
+    line: { color: c.accent, width: 2 },
     fill: 'tozeroy', fillcolor: cssVar('--accent-soft'),
     hovertemplate: 'K %{x}<br>IV %{y:.1f}%<extra></extra>',
   }
@@ -231,7 +197,7 @@ function SmileTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: st
   const wingTrace = d?.call_25 && d?.put_25 ? {
     type: 'scatter', mode: 'markers', name: '25Δ wings',
     x: [d.put_25.strike, d.call_25.strike], y: [d.put_25.iv * 100, d.call_25.iv * 100],
-    marker: { color: c.neg, size: 8, symbol: 'diamond' },
+    marker: { color: c.neg, size: 10, symbol: 'diamond' },
     hovertemplate: '25Δ K %{x}: %{y:.1f}%<extra></extra>',
   } : null
   const atmTrace = forward != null && atmPct != null ? {
@@ -245,8 +211,10 @@ function SmileTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: st
   const ymin = yvals.length ? Math.max(0, Math.min(...yvals) - 3) : 0
   const ymax = yvals.length ? Math.max(...yvals) + 4 : 100
   const layout = {
-    ...baseLayout(), height: 460, showlegend: true,
-    legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0)', font: { color: c.muted, size: 11 } },
+    ...baseLayout(), height: 470, showlegend: true,
+    margin: { l: 58, r: 18, t: 12, b: 70 },
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.24, yanchor: 'top',
+      bgcolor: 'rgba(0,0,0,0)', font: { color: c.muted, size: 11 } },
     xaxis: { ...baseLayout().xaxis, title: { text: 'Strike' } },
     yaxis: { ...baseLayout().yaxis, title: { text: 'Implied volatility %' }, range: [ymin, ymax] },
     shapes: [
@@ -254,8 +222,8 @@ function SmileTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: st
       spot != null ? { type: 'line', x0: spot, x1: spot, y0: 0, y1: 1, yref: 'paper', line: { color: c.muted, dash: 'dot', width: 1 } } : null,
     ].filter(Boolean),
     annotations: [
-      forward != null ? { x: forward, y: 1, yref: 'paper', text: 'forward', showarrow: false, font: { color: c.accent, size: 10 }, yanchor: 'bottom', xanchor: 'left' } : null,
-      spot != null && Math.abs((spot ?? 0) - (forward ?? 0)) > (xmax - xmin) * 0.01 ? { x: spot, y: 1, yref: 'paper', text: 'spot', showarrow: false, font: { color: c.muted, size: 10 }, yanchor: 'bottom', xanchor: 'right' } : null,
+      forward != null ? { x: forward, y: 1, yref: 'paper', text: 'Forward', showarrow: false, font: { color: c.accent, size: 10 }, yanchor: 'bottom', xanchor: 'left' } : null,
+      spot != null ? { x: spot, y: 0.94, yref: 'paper', text: 'Spot', showarrow: false, font: { color: c.muted, size: 10 }, yanchor: 'bottom', xanchor: 'right' } : null,
     ].filter(Boolean),
   }
   const chartData = [benchTrace, smileTrace, wingTrace, atmTrace].filter(Boolean)
@@ -286,7 +254,7 @@ function SmileTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: st
         {smile.isError && <Failed error={smile.error} />}
         {d && (
           <Plot key={themeKey} data={chartData} layout={layout} config={plotConfig}
-            style={{ width: '100%', height: 460 }} useResizeHandler />
+            style={{ width: '100%', height: 470 }} useResizeHandler />
         )}
       </div>
     </div>
@@ -303,39 +271,80 @@ function RealizedTab({ ticker, themeKey }: { ticker: string; themeKey: string })
   if (isError) return <Failed error={error} />
   if (!data) return null
 
-  const rv = data.realized_vol
   const atm = data.atm_iv
-  const cats = ['RV 10d', 'RV 20d', 'RV 30d', 'RV 60d', 'ATM IV']
-  const vals = [rv['10'], rv['20'], rv['30'], rv['60'], atm].map((v) => (v ? v * 100 : null))
-  const barColors = [c.muted, c.muted, c.muted, c.muted, c.accent]
+  const gk = data.realized_vol_gk
+  const cc = data.realized_vol_cc
+  const gk20 = gk['20']
+  const wins = ['10', '20', '30', '60']
 
-  const rv20 = rv['20']
   let verdict: React.ReactNode = <span className="dim">Not enough data to compare.</span>
-  if (atm && rv20) {
-    if (atm > rv20 * 1.05) verdict = <>Implied above realized. Options look <b className="rich">rich</b>.</>
-    else if (atm < rv20 * 0.95) verdict = <>Implied below realized. Options look <b className="cheap">cheap</b>.</>
+  if (atm && gk20) {
+    if (atm > gk20 * 1.05) verdict = <>Implied above realized. Options look <b className="rich">rich</b>.</>
+    else if (atm < gk20 * 0.95) verdict = <>Implied below realized. Options look <b className="cheap">cheap</b>.</>
     else verdict = <>Implied is roughly in line with realized.</>
   }
 
-  const layout = {
-    ...baseLayout(), height: 340,
-    yaxis: { ...baseLayout().yaxis, title: { text: 'Annualized %' }, rangemode: 'tozero' },
-    xaxis: { ...baseLayout().xaxis },
-    bargap: 0.45,
+  const dv = data.divergence
+  let divergenceNote: React.ReactNode = null
+  if (dv) {
+    const apart = (dv.rel_diff * 100).toFixed(0)
+    const dir = dv.gk_below_cc ? 'below' : 'above'
+    divergenceNote = (
+      <div className="verdict" style={{ marginBottom: 12 }}>
+        Garman-Klass {(dv.gk * 100).toFixed(1)}% vs close-to-close {(dv.cc * 100).toFixed(1)}% ({apart}% apart), GK sits {dir}.
+        {dv.flag
+          ? <> <b className="rich">Substantial divergence</b>: large intraday moves relative to closes, or overnight gaps understating Garman-Klass.</>
+          : dv.gk_below_cc ? ' Consistent with overnight gaps, which Garman-Klass does not capture.' : ''}
+      </div>
+    )
   }
-  const trace = {
-    type: 'bar', x: cats, y: vals, marker: { color: barColors },
-    text: vals.map((v) => (v ? v.toFixed(1) + '%' : '')), textposition: 'outside',
-    textfont: { color: c.text }, hovertemplate: '%{x}: %{y:.1f}%<extra></extra>',
+
+  // Bars: realized (Garman-Klass primary, close-to-close secondary); ATM implied as a line.
+  const barLayout = {
+    ...baseLayout(), height: 320, barmode: 'group', showlegend: true,
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12, yanchor: 'bottom',
+      bgcolor: 'rgba(0,0,0,0)', font: { color: c.muted, size: 11 } },
+    margin: { l: 52, r: 18, t: 34, b: 34 },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'Annualized %' }, rangemode: 'tozero' },
+    shapes: atm ? [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: atm * 100, y1: atm * 100,
+      line: { color: c.text, dash: 'dash', width: 1.5 } }] : [],
+    annotations: atm ? [{ xref: 'paper', x: 0.995, y: atm * 100, text: `ATM implied ${(atm * 100).toFixed(1)}%`,
+      showarrow: false, font: { color: c.text, size: 11 }, xanchor: 'right', yanchor: 'bottom' }] : [],
+  }
+  const barData = [
+    { type: 'bar', name: 'Garman-Klass', x: wins.map((w) => w + 'd'),
+      y: wins.map((w) => (gk[w] ? gk[w]! * 100 : null)), marker: { color: c.accent },
+      hovertemplate: 'GK %{x}: %{y:.1f}%<extra></extra>' },
+    { type: 'bar', name: 'Close-to-close', x: wins.map((w) => w + 'd'),
+      y: wins.map((w) => (cc[w] ? cc[w]! * 100 : null)), marker: { color: c.muted },
+      hovertemplate: 'C2C %{x}: %{y:.1f}%<extra></extra>' },
+  ]
+
+  // Volatility cone: percentile bands of historical realized (GK) per window, today overlaid.
+  const coneWins = wins.map(Number)
+  const cone = data.cone
+  const band = (key: 'min' | 'p25' | 'median' | 'p75' | 'max' | 'current') =>
+    wins.map((w) => { const b = cone[w]; return b ? b[key] * 100 : null })
+  const coneData = [
+    { type: 'scatter', mode: 'lines', x: coneWins, y: band('min'), line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
+    { type: 'scatter', mode: 'lines', name: 'min–max', x: coneWins, y: band('max'), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(140,140,150,0.10)', hoverinfo: 'skip' },
+    { type: 'scatter', mode: 'lines', x: coneWins, y: band('p25'), line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
+    { type: 'scatter', mode: 'lines', name: '25–75%', x: coneWins, y: band('p75'), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(140,140,150,0.20)', hoverinfo: 'skip' },
+    { type: 'scatter', mode: 'lines', name: 'median', x: coneWins, y: band('median'), line: { color: c.muted, dash: 'dot', width: 1.5 }, hovertemplate: 'median %{y:.1f}%<extra></extra>' },
+    { type: 'scatter', mode: 'lines+markers', name: 'current', x: coneWins, y: band('current'), line: { color: c.accent, width: 2 }, marker: { size: 8, color: c.accent }, hovertemplate: 'current %{x}d: %{y:.1f}%<extra></extra>' },
+  ]
+  const coneLayout = {
+    ...baseLayout(), height: 340, showlegend: true,
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12, yanchor: 'bottom', bgcolor: 'rgba(0,0,0,0)', font: { color: c.muted, size: 11 } },
+    margin: { l: 52, r: 18, t: 34, b: 44 },
+    xaxis: { ...baseLayout().xaxis, title: { text: 'Realized-vol window (days)' }, tickvals: coneWins },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'Garman-Klass vol %' }, rangemode: 'tozero' },
   }
 
   return (
     <div>
       <div className="stat-row">
-        <div className="stat">
-          <span className="lbl">ATM implied vol</span>
-          <span className="val">{pct(atm)}</span>
-        </div>
+        <div className="stat"><span className="lbl">ATM implied vol</span><span className="val">{pct(atm)}</span></div>
         {data.iv_rank && (
           <div className="stat rank">
             <span className="lbl">IV rank · RV proxy</span>
@@ -346,16 +355,32 @@ function RealizedTab({ ticker, themeKey }: { ticker: string; themeKey: string })
           </div>
         )}
         <div className="stat">
-          <span className="lbl">Realized 20d</span>
-          <span className="val">{pct(rv20)}</span>
+          <span className="lbl">Vol risk premium (20d)</span>
+          <span className={`val ${data.vrp ? (data.vrp.spread >= 0 ? 'pos' : 'neg') : ''}`}>{volPts(data.vrp?.spread)}</span>
+        </div>
+        <div className="stat">
+          <span className="lbl">Implied / realized</span>
+          <span className="val">{data.vrp ? data.vrp.ratio.toFixed(2) + '×' : '—'}</span>
         </div>
       </div>
-      <div className="verdict" style={{ marginBottom: 14 }}>{verdict}</div>
+
+      <div className="verdict" style={{ marginBottom: 12 }}>{verdict}</div>
+      {divergenceNote}
+
+      <div className="chart-card" style={{ marginBottom: 14 }}>
+        <Plot key={themeKey + 'bar'} data={barData} layout={barLayout} config={plotConfig}
+          style={{ width: '100%', height: 320 }} useResizeHandler />
+        <div className="chart-note">
+          Realized volatility, Garman-Klass primary (open-high-low-close) and close-to-close for comparison, against the at-the-money implied line. Garman-Klass understates vol when the underlying gaps between sessions.
+        </div>
+      </div>
+
       <div className="chart-card">
-        <Plot key={themeKey} data={[trace]} layout={layout} config={plotConfig}
+        <div className="lbl" style={{ marginBottom: 6 }}>Realized-vol cone (Garman-Klass, 1-year history)</div>
+        <Plot key={themeKey + 'cone'} data={coneData} layout={coneLayout} config={plotConfig}
           style={{ width: '100%', height: 340 }} useResizeHandler />
         <div className="chart-note">
-          Realized volatility uses close-to-close returns; implied uses the at-the-money option (exp {data.atm_expiration}).
+          Percentile bands of realized volatility at each window over the past year, with today's values overlaid. Shows whether current realized is high or low by the name's own history.
         </div>
       </div>
     </div>

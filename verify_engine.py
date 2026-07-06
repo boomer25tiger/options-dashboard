@@ -5,7 +5,8 @@ Each check states its source and the expected number.
 
 from pricing_engine import (
     bs_price, bs_greeks, binomial_price, implied_vol,
-    realized_vol, prob_itm, breakeven_long_option, prob_profit_long_option
+    realized_vol, garman_klass_vol, prob_itm, breakeven_long_option,
+    prob_profit_long_option
 )
 
 def check(label, got, expected, tol):
@@ -120,6 +121,30 @@ rv_alt = realized_vol(alt)
 # returns are +/-0.01; population-ish stdev ~0.01, annualized ~0.01*sqrt(252)
 expected_alt = 0.01 * _m.sqrt(252)
 check("Alternating +/-1% returns -> annualized", rv_alt, expected_alt, 0.005)
+
+print()
+print("=" * 70)
+print("GARMAN-KLASS REALIZED VOLATILITY")
+print("=" * 70)
+n_gk = 30
+# No intraday movement at all -> zero GK vol.
+flat_o = [100.0] * n_gk
+check("Flat OHLC -> ~0 Garman-Klass vol",
+      garman_klass_vol(flat_o, flat_o, flat_o, flat_o), 0.0, 1e-9)
+
+# Constant daily range with flat closes: GK from the H/L range alone.
+o2 = [100.0] * n_gk; c2 = [100.0] * n_gk
+h2 = [101.0] * n_gk; l2 = [99.0] * n_gk
+expected_gk = _m.sqrt(0.5 * _m.log(101 / 99) ** 2 * 252)
+check("Constant-range OHLC -> Garman-Klass matches formula",
+      garman_klass_vol(o2, h2, l2, c2), expected_gk, 1e-6)
+
+# GK captures intraday range that close-to-close (flat closes) misses.
+gk_intraday = garman_klass_vol(o2, h2, l2, c2)
+cc_intraday = realized_vol(c2) or 0.0
+print(f"        GK={gk_intraday:.4f} vs close-to-close={cc_intraday:.4f}")
+print(f"[{'PASS' if gk_intraday > cc_intraday else 'FAIL'}] "
+      f"GK captures intraday range that close-to-close misses")
 
 print()
 print("=" * 70)

@@ -139,24 +139,23 @@ def enrich(contract, spot, rate_fn, dividend_yield, now):
     contract.rate_used = r
     q = dividend_yield or 0.0
 
-    # IV: prefer a market-consistent value computed from the price via the engine.
-    # A provider's own IV can be stale or degenerate (bid=ask=0 with a near-zero IV
-    # over a market close), so it is only a fallback when no usable price exists.
-    provider_iv, provider_src = contract.iv, contract.iv_source
+    # IV source policy (Option C): use the provider's own IV when it is valid, and
+    # compute IV from the market price via the engine only when the provider field
+    # is missing or degenerate (e.g. bid=ask=0 with a near-zero IV over a close).
+    # iv_source records which was used ('alpaca'/'yfinance' vs 'computed').
+    provider_iv = contract.iv
     iv = None
-    price = contract.mid if contract.mid is not None else contract.last
-    if spot and T > 0 and price and price > 0:
-        solved = implied_vol(price, spot, contract.strike, T, r,
-                             contract.option_type, q)
-        if solved is not None and solved > 0:
-            iv, contract.iv_source = solved, "computed"
-    if iv is None and provider_iv and provider_iv >= _IV_MIN_TRUST:
-        iv, contract.iv_source = provider_iv, provider_src
-
-    # Drop implausible IVs (deep-wing noise), from any source, so no 150%+ value
-    # reaches the display; the contract keeps its price data.
-    if iv is not None and (iv <= 0 or iv > _IV_MAX_PLAUSIBLE):
-        iv, contract.iv_source = None, None
+    if provider_iv is not None and _IV_MIN_TRUST <= provider_iv <= _IV_MAX_PLAUSIBLE:
+        iv = provider_iv  # keep the existing provider iv_source label
+    else:
+        price = contract.mid if contract.mid is not None else contract.last
+        if spot and T > 0 and price and price > 0:
+            solved = implied_vol(price, spot, contract.strike, T, r,
+                                 contract.option_type, q)
+            if solved is not None and 0 < solved <= _IV_MAX_PLAUSIBLE:
+                iv, contract.iv_source = solved, "computed"
+    if iv is None:
+        contract.iv_source = None
     contract.iv = iv
 
     if iv and iv > 0 and spot and T > 0:

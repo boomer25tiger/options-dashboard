@@ -12,7 +12,7 @@ import sys
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
-from pricing_engine import realized_vol  # noqa: E402
+from pricing_engine import realized_vol, garman_klass_vol  # noqa: E402
 
 
 def realized_vol_windows(closes, windows=(10, 20, 30, 60)):
@@ -51,6 +51,74 @@ def realized_vol_rank(closes, window=20, lookback=252):
         "rank": rank, "percentile": percentile,
         "window": window, "lookback": len(dist), "proxy": "realized_vol",
     }
+
+
+def _ohlc(bars):
+    return (
+        [b["o"] for b in bars], [b["h"] for b in bars],
+        [b["l"] for b in bars], [b["c"] for b in bars],
+    )
+
+
+def garman_klass_windows(bars, windows=(10, 20, 30, 60)):
+    """Garman-Klass realized vol for each lookback window, from OHLC bars."""
+    o, h, l, c = _ohlc(bars)
+    return {w: garman_klass_vol(o, h, l, c, window=w) for w in windows}
+
+
+def garman_klass_series(bars, window=20):
+    """Rolling Garman-Klass vol, one value per day once `window` sessions exist."""
+    o, h, l, c = _ohlc(bars)
+    series = []
+    for end in range(window, len(c) + 1):
+        v = garman_klass_vol(o[end - window:end], h[end - window:end],
+                             l[end - window:end], c[end - window:end])
+        if v is not None:
+            series.append(v)
+    return series
+
+
+def _percentile(sorted_vals, p):
+    if not sorted_vals:
+        return None
+    idx = int(round(p * (len(sorted_vals) - 1)))
+    return sorted_vals[idx]
+
+
+def vol_cone(bars, windows=(10, 20, 30, 60), lookback=252):
+    """
+    Realized-vol cone: the historical distribution (min / 25th / median / 75th /
+    max) of Garman-Klass vol at each window over the lookback, with today's value.
+    Shows whether current realized is high or low by the name's own history.
+    """
+    cone = {}
+    for w in windows:
+        series = garman_klass_series(bars, window=w)
+        if len(series) < 5:
+            cone[str(w)] = None
+            continue
+        dist = sorted(series[-lookback:] if len(series) > lookback else series)
+        cone[str(w)] = {
+            "min": dist[0], "p25": _percentile(dist, 0.25),
+            "median": _percentile(dist, 0.5), "p75": _percentile(dist, 0.75),
+            "max": dist[-1], "current": series[-1], "samples": len(dist),
+        }
+    return cone
+
+
+def gk_cc_divergence(gk_windows, cc_windows, window=20, threshold=0.25):
+    """
+    Flag when Garman-Klass and close-to-close diverge substantially at `window`.
+    A large gap signals significant intraday movement relative to closes, and warns
+    of the overnight-gap limitation where GK can sit structurally below C2C.
+    """
+    gk = gk_windows.get(window)
+    cc = cc_windows.get(window)
+    if not gk or not cc:
+        return None
+    rel = abs(gk - cc) / cc
+    return {"window": window, "gk": gk, "cc": cc, "rel_diff": rel,
+            "flag": rel > threshold, "gk_below_cc": gk < cc}
 
 
 def atm_iv(chain, expiration=None):

@@ -231,6 +231,43 @@ def realized_vol(closes, window=None, annualization=252):
     return sqrt(variance) * sqrt(annualization)
 
 
+def garman_klass_vol(opens, highs, lows, closes, window=None, annualization=252):
+    """
+    Garman-Klass realized volatility from OHLC bars.
+
+    Uses each session's high-low range and open-close move, which makes it more
+    efficient (lower variance) than close-to-close, especially at short windows.
+    Per-session variance estimate:
+        0.5 * ln(H/L)^2  -  (2*ln2 - 1) * ln(C/O)^2
+    Annualized as sqrt(annualization * mean_session_variance).
+
+    CAVEAT: it assumes continuous trading with no jumps, so it UNDERSTATES vol when
+    the underlying gaps between sessions (an overnight gap moves close-to-close but
+    not the intraday range). For frequently gapping names it can sit below the
+    close-to-close figure for that structural reason.
+
+    Returns annualized volatility as a decimal (0.20 = 20%), or None with no data.
+    """
+    n = min(len(opens), len(highs), len(lows), len(closes))
+    k = 2.0 * log(2.0) - 1.0
+    daily = []
+    for i in range(n):
+        o, h, l, c = opens[i], highs[i], lows[i], closes[i]
+        if o <= 0 or h <= 0 or l <= 0 or c <= 0:
+            continue
+        hl = log(h / l)
+        co = log(c / o)
+        daily.append(0.5 * hl * hl - k * co * co)
+    if window is not None:
+        daily = daily[-window:]
+    if not daily:
+        return None
+    mean_var = sum(daily) / len(daily)
+    if mean_var <= 0:
+        return 0.0
+    return sqrt(mean_var * annualization)
+
+
 # ---------------------------------------------------------------------------
 # Probability of profit and breakeven
 # ---------------------------------------------------------------------------

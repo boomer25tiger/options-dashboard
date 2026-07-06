@@ -84,13 +84,25 @@ export interface SmileResponse {
   points: SmilePoint[]
 }
 
+export interface ConeBand {
+  min: number; p25: number; median: number; p75: number; max: number
+  current: number; samples: number
+}
 export interface RealizedVsImplied {
   ticker: string
-  realized_vol: Record<string, number | null>
-  iv_rank: IvRank | null
+  spot: number | null
   atm_iv: number | null
   atm_expiration: string
-  spot: number | null
+  realized_vol: Record<string, number | null>       // primary (Garman-Klass)
+  realized_vol_gk: Record<string, number | null>
+  realized_vol_cc: Record<string, number | null>
+  iv_rank: IvRank | null
+  vrp: { spread: number; ratio: number; basis: string } | null
+  divergence: {
+    window: number; gk: number; cc: number; rel_diff: number
+    flag: boolean; gk_below_cc: boolean
+  } | null
+  cone: Record<string, ConeBand | null>
 }
 
 export interface ExpirationsResponse { ticker: string; expirations: string[] }
