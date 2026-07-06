@@ -138,6 +138,29 @@ export interface ContractDetail {
   iv_source: string
 }
 
+export interface StrategyLegInput {
+  option_type: 'call' | 'put' | 'stock'
+  quantity: number
+  strike?: number | null
+  expiration?: string | null
+}
+export interface StrategyResponse {
+  ticker: string
+  spot: number | null
+  as_of: string
+  context: { rate_source: string; rate_as_of: string | null; dividend: { value: number; source: string }; iv_source: string }
+  summary: {
+    net_cost: number
+    greeks: Greeks
+    greeks_units: Record<string, string>
+    breakevens: number[]
+    max_profit: number | null
+    max_loss: number | null
+    prob_of_profit: number | null
+  }
+  payoff: { underlying: number[]; curves: Record<string, number[]> }
+}
+
 async function get<T>(path: string, params: Record<string, string | number | undefined>): Promise<T> {
   const q = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -166,4 +189,20 @@ export const api = {
     get<RealizedVsImplied>('analysis/realized-vs-implied', { ticker }),
   contract: (ticker: string, symbol: string, ivSource: string) =>
     get<ContractDetail>('contract', { ticker, symbol, iv_source: ivSource }),
+  strategyPrice: (ticker: string, legs: StrategyLegInput[], ivSource: string) =>
+    post<StrategyResponse>('strategy/price', { ticker, legs, iv_source: ivSource }),
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`/api/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    let detail = res.statusText
+    try { detail = (await res.json()).detail ?? detail } catch { /* keep */ }
+    throw new Error(`${res.status}: ${detail}`)
+  }
+  return res.json() as Promise<T>
 }

@@ -3,6 +3,7 @@ import TopBar from './components/TopBar'
 import ChainPage from './pages/ChainPage'
 import AnalysisPage from './pages/AnalysisPage'
 import ContractPage from './pages/ContractPage'
+import StrategyPage from './pages/StrategyPage'
 import Placeholder from './pages/Placeholder'
 
 const PAGES = [
@@ -28,10 +29,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/chain" replace />} />
         <Route path="/chain" element={<ChainPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
-        <Route
-          path="/strategy"
-          element={<Placeholder title="Strategy" sub="Multi-leg builder, presets, and the time-aware payoff" />}
-        />
+        <Route path="/strategy" element={<StrategyPage />} />
         <Route path="/contract" element={<ContractPage />} />
         <Route
           path="/history"
