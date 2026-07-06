@@ -27,6 +27,12 @@ from backend.data.models import Greeks, OptionChain, OptionContract
 _DAYS_PER_YEAR = 365.0
 # US equity options settle at market close; approximate expiry at 20:00 UTC (~16:00 ET).
 _EXPIRY_HOUR_UTC = 20
+# Above this, an IV is treated as unreliable and dropped. Deep-wing short-dated
+# options back-solved from a one-tick penny quote yield 150-300% noise that sits
+# far above any real SPY-style level (~10-25%). A generous 1.5 (150%) cap removes
+# that noise without clipping realistic IV. Applies to all sources; tunable per
+# ticker later if a genuinely high-vol name needs more headroom.
+_IV_MAX_PLAUSIBLE = 1.5
 
 
 def _time_to_expiry(expiration, now):
@@ -140,6 +146,13 @@ def enrich(contract, spot, rate_fn, dividend_yield, now):
                 contract.iv = solved
                 contract.iv_source = "backsolved"
 
+    # Drop implausible IVs (deep-ITM noise or bad quotes), from any source, so no
+    # 300%+ value reaches the display; the contract keeps its price data.
+    if iv is not None and (iv <= 0 or iv > _IV_MAX_PLAUSIBLE):
+        iv = None
+        contract.iv = None
+        contract.iv_source = None
+
     if iv and iv > 0 and spot and T > 0:
         g = bs_greeks(spot, contract.strike, T, r, iv, contract.option_type, q)
         contract.greeks = Greeks(
@@ -154,6 +167,39 @@ def enrich(contract, spot, rate_fn, dividend_yield, now):
             else spot < contract.strike
         )
     return contract
+
+
+def _reconcile_iv_by_strike(contracts, spot, dividend_yield):
+    """
+    Enforce call/put IV equality at each strike (put-call parity), using the
+    out-of-the-money side as the reliable source. A deep-ITM option back-solves to
+    a meaningless IV from a stale mid barely above intrinsic; the same-strike OTM
+    option carries the trustworthy vol. The corrected side's Greeks are recomputed.
+    """
+    if not spot:
+        return
+    q = dividend_yield or 0.0
+    groups = {}
+    for c in contracts:
+        groups.setdefault((c.strike, c.expiration), {})[c.option_type] = c
+    for (strike, _exp), pair in groups.items():
+        call, put = pair.get("call"), pair.get("put")
+        if not (call and put):
+            continue
+        otm = put if strike <= spot else call
+        itm = call if strike <= spot else put
+        ref_iv = otm.iv if otm.iv else itm.iv
+        if not ref_iv or itm.iv == ref_iv:
+            continue
+        itm.iv = ref_iv
+        itm.iv_source = "parity"
+        T = itm.time_to_expiry
+        if T and T > 0 and itm.rate_used is not None:
+            g = bs_greeks(spot, itm.strike, T, itm.rate_used, ref_iv,
+                          itm.option_type, q)
+            itm.greeks = Greeks(delta=g["delta"], gamma=g["gamma"], vega=g["vega"],
+                                theta=g["theta"], rho=g["rho"])
+            itm.greeks_source = "recomputed"
 
 
 # ----------------------------------------------------------------------
@@ -209,6 +255,7 @@ def build_chain(underlying, *, alpaca_snapshots=None, yfinance_by_expiration=Non
         enrich(c, spot, rate_fn, dividend_yield, now)
         for c in merged.values()
     ]
+    _reconcile_iv_by_strike(contracts, spot, dividend_yield)
     contracts.sort(key=lambda c: (c.expiration, c.option_type, c.strike))
     expirations = sorted({c.expiration for c in contracts})
 
