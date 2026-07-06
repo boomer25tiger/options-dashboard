@@ -33,6 +33,10 @@ _EXPIRY_HOUR_UTC = 20
 # that noise without clipping realistic IV. Applies to all sources; tunable per
 # ticker later if a genuinely high-vol name needs more headroom.
 _IV_MAX_PLAUSIBLE = 1.5
+# Below this an equity-option IV is degenerate. Over a multi-day market close the
+# providers stop quoting (bid=ask=0) and report a near-zero IV, while the last
+# trade price stays intact; treat such IVs as missing and back-solve from price.
+_IV_MIN_TRUST = 0.02
 
 
 def _time_to_expiry(expiration, now):
@@ -135,23 +139,25 @@ def enrich(contract, spot, rate_fn, dividend_yield, now):
     contract.rate_used = r
     q = dividend_yield or 0.0
 
-    iv = contract.iv
-    if (iv is None or iv <= 0) and spot and T > 0:
-        price = contract.mid if contract.mid is not None else contract.last
-        if price and price > 0:
-            solved = implied_vol(price, spot, contract.strike, T, r,
-                                 contract.option_type, q)
-            if solved is not None and solved > 0:
-                iv = solved
-                contract.iv = solved
-                contract.iv_source = "backsolved"
+    # IV: prefer a market-consistent value computed from the price via the engine.
+    # A provider's own IV can be stale or degenerate (bid=ask=0 with a near-zero IV
+    # over a market close), so it is only a fallback when no usable price exists.
+    provider_iv, provider_src = contract.iv, contract.iv_source
+    iv = None
+    price = contract.mid if contract.mid is not None else contract.last
+    if spot and T > 0 and price and price > 0:
+        solved = implied_vol(price, spot, contract.strike, T, r,
+                             contract.option_type, q)
+        if solved is not None and solved > 0:
+            iv, contract.iv_source = solved, "computed"
+    if iv is None and provider_iv and provider_iv >= _IV_MIN_TRUST:
+        iv, contract.iv_source = provider_iv, provider_src
 
-    # Drop implausible IVs (deep-ITM noise or bad quotes), from any source, so no
-    # 300%+ value reaches the display; the contract keeps its price data.
+    # Drop implausible IVs (deep-wing noise), from any source, so no 150%+ value
+    # reaches the display; the contract keeps its price data.
     if iv is not None and (iv <= 0 or iv > _IV_MAX_PLAUSIBLE):
-        iv = None
-        contract.iv = None
-        contract.iv_source = None
+        iv, contract.iv_source = None, None
+    contract.iv = iv
 
     if iv and iv > 0 and spot and T > 0:
         g = bs_greeks(spot, contract.strike, T, r, iv, contract.option_type, q)

@@ -75,8 +75,12 @@ export interface SurfaceResponse {
 export interface SmilePoint {
   strike: number; iv: number; type: 'call' | 'put'; in_the_money: boolean | null
 }
+export interface SmileLeg { strike: number; iv: number; delta: number }
 export interface SmileResponse {
-  ticker: string; expiration: string; spot: number | null; as_of: string
+  ticker: string; expiration: string; spot: number | null; forward: number | null
+  r: number; q: number; t: number; as_of: string
+  atm_iv: number | null; rr_25: number | null; bf_25: number | null
+  call_25: SmileLeg | null; put_25: SmileLeg | null
   points: SmilePoint[]
 }
 

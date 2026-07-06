@@ -7,6 +7,7 @@ place. Heavy chain pulls are cached briefly (the market data is last-session whi
 closed, so a short TTL is safe and keeps tab-switching fast).
 """
 import datetime as dt
+import math
 import os
 import sys
 import time
@@ -292,13 +293,61 @@ def surface(ticker, max_expirations=8, iv_source="auto"):
     }
 
 
+def _skew_metrics(chain, exp, forward):
+    """
+    ATM IV (at the forward), the 25-delta risk reversal (call IV minus put IV) and
+    the 25-delta butterfly (wing average above ATM). Uses the per-strike reconciled
+    IV and the recomputed deltas already on the chain, for the target expiration
+    only (the loaded chain can include nearer expirations from the Alpaca pull).
+    """
+    contracts = [c for c in chain.contracts if c.expiration == exp]
+    calls = [c for c in contracts
+             if c.option_type == "call" and c.iv and c.greeks.delta is not None]
+    puts = [c for c in contracts
+            if c.option_type == "put" and c.iv and c.greeks.delta is not None]
+    c25 = min(calls, key=lambda c: abs(c.greeks.delta - 0.25), default=None)
+    p25 = min(puts, key=lambda c: abs(c.greeks.delta + 0.25), default=None)
+    # Only trust a 25-delta strike if one actually lands near 0.25. Near expiry the
+    # delta steps from ~0 to ~1 with no strike in between, so the metric is undefined.
+    if c25 and abs(c25.greeks.delta - 0.25) > 0.12:
+        c25 = None
+    if p25 and abs(p25.greeks.delta + 0.25) > 0.12:
+        p25 = None
+
+    per_strike = {}
+    for c in contracts:
+        if c.iv and c.strike not in per_strike:
+            per_strike[c.strike] = c.iv
+    atm_iv = rates.interpolate_rate(forward, per_strike) if per_strike else None
+
+    rr = (c25.iv - p25.iv) if (c25 and p25) else None
+    bf = ((c25.iv + p25.iv) / 2 - atm_iv) if (c25 and p25 and atm_iv) else None
+
+    def leg(c):
+        return {"strike": c.strike, "iv": c.iv, "delta": c.greeks.delta} if c else None
+
+    return {"atm_iv": atm_iv, "rr_25": rr, "bf_25": bf,
+            "call_25": leg(c25), "put_25": leg(p25)}
+
+
 def smile(ticker, expiration_str, iv_source="auto"):
     exp = dt.date.fromisoformat(expiration_str)
-    chain, meta, _, _ = _load_chain(ticker, [expiration_str], [exp], iv_source,
-                                    None, strike_band=0.5)
+    chain, meta, rate_fn, now = _load_chain(ticker, [expiration_str], [exp],
+                                            iv_source, None, strike_band=0.5)
+    spot = chain.spot
+    T = normalize.time_to_expiry(exp, now)
+    r = rate_fn(T) if rate_fn else 0.0
+    q = meta["dividend"]["value"]
+    forward = spot * math.exp((r - q) * T) if (spot and T > 0) else spot
+    metrics = _skew_metrics(chain, exp, forward) if spot else {}
     return {
-        "ticker": ticker, "expiration": expiration_str, "spot": chain.spot,
-        "as_of": meta["as_of"], "points": analytics.smile_points(chain, exp),
+        "ticker": ticker, "expiration": expiration_str,
+        "spot": spot, "forward": forward, "r": r, "q": q, "t": T,
+        "as_of": meta["as_of"],
+        "atm_iv": metrics.get("atm_iv"),
+        "rr_25": metrics.get("rr_25"), "bf_25": metrics.get("bf_25"),
+        "call_25": metrics.get("call_25"), "put_25": metrics.get("put_25"),
+        "points": analytics.smile_points(chain, exp),
     }
 
 
