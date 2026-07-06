@@ -4,9 +4,31 @@ import Plot from '../Plot'
 import { useStore } from '../store'
 import { api } from '../api'
 import { pct } from '../format'
-import { baseLayout, plotColors, ivColorscale, plotConfig } from '../plotTheme'
+import { baseLayout, plotColors, ivColorscale, cssVar, plotConfig } from '../plotTheme'
 
 type Tab = 'surface' | 'smile' | 'realized'
+
+// Linear interpolation of a sorted [strike, iv] smile onto an arbitrary strike.
+function lerp(pts: { strike: number; iv: number }[], x: number): number | null {
+  if (pts.length === 0 || x < pts[0].strike || x > pts[pts.length - 1].strike) return null
+  for (let i = 1; i < pts.length; i++) {
+    if (x <= pts[i].strike) {
+      const a = pts[i - 1], b = pts[i]
+      const t = (x - a.strike) / (b.strike - a.strike || 1)
+      return a.iv + t * (b.iv - a.iv)
+    }
+  }
+  return pts[pts.length - 1].iv
+}
+
+// 3-point moving average over defined values (smooths grid rows).
+function smoothRow(row: (number | null)[]): (number | null)[] {
+  return row.map((v, i) => {
+    if (v == null) return null
+    const w = [row[i - 1], v, row[i + 1]].filter((x): x is number => x != null)
+    return w.reduce((s, x) => s + x, 0) / w.length
+  })
+}
 
 export default function AnalysisPage() {
   const { ticker, ivSource, theme } = useStore()
@@ -43,49 +65,66 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
   })
   const c = plotColors()
 
-  const trace = useMemo(() => {
+  const grid = useMemo(() => {
     if (!data) return null
     const spot = data.spot ?? 0
-    // Focus on the liquid, near-money region so the z-axis is not blown out by
-    // short-dated wing IV.
-    const pts = data.points.filter(
-      (p) => p.iv > 0 && p.iv <= 0.8 && (!spot || (p.strike >= spot * 0.75 && p.strike <= spot * 1.25)),
-    )
-    return {
-      type: 'mesh3d',
-      x: pts.map((p) => p.strike),
-      y: pts.map((p) => p.tenor),
-      z: pts.map((p) => p.iv * 100),
-      intensity: pts.map((p) => p.iv * 100),
-      colorscale: ivColorscale(),
-      opacity: 0.9,
-      showscale: true,
-      colorbar: { title: 'IV %', tickfont: { color: c.muted }, outlinecolor: c.grid, thickness: 10, len: 0.55 },
-      hovertemplate: 'K %{x}<br>T %{y:.2f}y<br>IV %{z:.1f}%<extra></extra>',
+    const byTenor = new Map<number, { strike: number; iv: number }[]>()
+    for (const p of data.points) {
+      if (!(p.iv > 0 && p.iv <= 0.8)) continue
+      if (spot && (p.strike < spot * 0.8 || p.strike > spot * 1.2)) continue
+      const arr = byTenor.get(p.tenor) ?? []
+      arr.push({ strike: p.strike, iv: p.iv })
+      byTenor.set(p.tenor, arr)
     }
-  }, [data, c.muted, c.grid])
+    const tenors = [...byTenor.keys()].sort((a, b) => a - b)
+    if (tenors.length < 2) return null
+    for (const t of tenors) byTenor.get(t)!.sort((a, b) => a.strike - b.strike)
+    const all = [...byTenor.values()].flat().map((p) => p.strike)
+    const lo = Math.min(...all), hi = Math.max(...all)
+    const N = 48
+    const strikes = Array.from({ length: N }, (_, i) => lo + ((hi - lo) * i) / (N - 1))
+    const z = tenors.map((t) => {
+      const pts = byTenor.get(t)!
+      return smoothRow(strikes.map((s) => { const v = lerp(pts, s); return v == null ? null : v * 100 }))
+    })
+    return { strikes, tenors, z }
+  }, [data])
 
   if (isLoading) return <Loading label={`Loading surface for ${ticker}…`} />
   if (isError) return <Failed error={error} />
-  if (!trace) return null
+  if (!grid) return <div className="chart-card"><div className="msg">Not enough surface data.</div></div>
 
-  const axis = { color: c.muted, gridcolor: c.grid, showbackground: false, zerolinecolor: c.grid }
+  const trace = {
+    type: 'surface',
+    x: grid.strikes, y: grid.tenors, z: grid.z,
+    colorscale: ivColorscale(), showscale: true, opacity: 1,
+    colorbar: { title: 'IV %', tickfont: { color: c.muted }, outlinecolor: c.grid, thickness: 10, len: 0.55 },
+    lighting: { ambient: 0.78, diffuse: 0.5, specular: 0.12, roughness: 0.55, fresnel: 0.15 },
+    lightposition: { x: 120, y: 220, z: 320 },
+    contours: { z: { show: true, usecolormap: true, project: { z: true }, width: 1 } },
+    hovertemplate: 'K %{x:.0f}<br>T %{y:.3f}y<br>IV %{z:.1f}%<extra></extra>',
+  }
+  const axis = {
+    color: c.muted, gridcolor: c.grid, zerolinecolor: c.grid,
+    showbackground: false, showspikes: false, tickfont: { color: c.muted },
+  }
   const layout = {
     ...baseLayout(),
-    height: 560,
+    height: 580,
     scene: {
       xaxis: { ...axis, title: { text: 'Strike' } },
       yaxis: { ...axis, title: { text: 'Tenor (yrs)' } },
       zaxis: { ...axis, title: { text: 'IV %' } },
-      camera: { eye: { x: 1.7, y: -1.5, z: 0.7 } },
+      camera: { eye: { x: 1.5, y: -1.65, z: 0.55 } },
+      aspectratio: { x: 1.5, y: 1, z: 0.7 },
     },
   }
   return (
     <div className="chart-card">
       <Plot key={themeKey} data={[trace]} layout={layout} config={plotConfig}
-        style={{ width: '100%', height: 560 }} useResizeHandler />
+        style={{ width: '100%', height: 580 }} useResizeHandler />
       <div className="chart-note">
-        IV surface across strike and expiration, near-money band. Drag to rotate, scroll to zoom.
+        IV interpolated across strike and expiration (near-money band), smoothed. Drag to rotate, scroll to zoom.
       </div>
     </div>
   )
@@ -106,25 +145,35 @@ function SmileTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: st
   const c = plotColors()
 
   const pts = useMemo(() => {
-    if (!smile.data) return [] as [number, number][]
+    if (!smile.data) return [] as { strike: number; iv: number }[]
     const m = new Map<number, number>()
     for (const p of smile.data.points) {
       if (p.iv > 0 && p.iv <= 1.0 && !m.has(p.strike)) m.set(p.strike, p.iv)
     }
-    return [...m.entries()].sort((a, b) => a[0] - b[0])
+    const raw = [...m.entries()].sort((a, b) => a[0] - b[0]).map(([strike, iv]) => ({ strike, iv }))
+    // Drop spikes: a point that deviates sharply from its neighbours' average.
+    return raw.filter((p, i) => {
+      if (i === 0 || i === raw.length - 1) return true
+      const nb = (raw[i - 1].iv + raw[i + 1].iv) / 2
+      return Math.abs(p.iv - nb) < nb * 0.5
+    })
   }, [smile.data])
 
   const spot = smile.data?.spot ?? null
   const trace = {
-    type: 'scatter', mode: 'lines+markers',
-    x: pts.map((p) => p[0]), y: pts.map((p) => p[1] * 100),
-    line: { color: c.accent, width: 2 }, marker: { size: 4, color: c.accent },
+    type: 'scatter', mode: 'lines',
+    x: pts.map((p) => p.strike), y: pts.map((p) => p.iv * 100),
+    line: { color: c.accent, width: 2.5, shape: 'spline', smoothing: 1.0 },
+    fill: 'tozeroy', fillcolor: cssVar('--accent-soft'),
     hovertemplate: 'K %{x}<br>IV %{y:.1f}%<extra></extra>',
   }
+  const ys = pts.map((p) => p.iv * 100)
+  const ymin = ys.length ? Math.max(0, Math.min(...ys) - 3) : 0
+  const ymax = ys.length ? Math.max(...ys) + 3 : 100
   const layout = {
-    ...baseLayout(), height: 460,
-    xaxis: { ...baseLayout().xaxis, title: 'Strike' },
-    yaxis: { ...baseLayout().yaxis, title: 'Implied volatility %' },
+    ...baseLayout(), height: 470,
+    xaxis: { ...baseLayout().xaxis, title: { text: 'Strike' } },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'Implied volatility %' }, range: [ymin, ymax] },
     shapes: spot ? [{ type: 'line', x0: spot, x1: spot, y0: 0, y1: 1, yref: 'paper',
       line: { color: c.muted, dash: 'dot', width: 1 } }] : [],
     annotations: spot ? [{ x: spot, y: 1, yref: 'paper', text: 'spot', showarrow: false,
@@ -143,9 +192,9 @@ function SmileTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: st
         {smile.isError && <Failed error={smile.error} />}
         {smile.data && (
           <Plot key={themeKey} data={[trace]} layout={layout} config={plotConfig}
-            style={{ width: '100%', height: 460 }} useResizeHandler />
+            style={{ width: '100%', height: 470 }} useResizeHandler />
         )}
-        <div className="chart-note">IV vs strike for {exp}. Call and put IV are reconciled to one value per strike.</div>
+        <div className="chart-note">Implied vol vs strike for {exp}, spline-smoothed with spikes removed. Spot marked.</div>
       </div>
     </div>
   )
@@ -177,7 +226,7 @@ function RealizedTab({ ticker, themeKey }: { ticker: string; themeKey: string })
 
   const layout = {
     ...baseLayout(), height: 340,
-    yaxis: { ...baseLayout().yaxis, title: 'Annualized %', rangemode: 'tozero' },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'Annualized %' }, rangemode: 'tozero' },
     xaxis: { ...baseLayout().xaxis },
     bargap: 0.45,
   }
