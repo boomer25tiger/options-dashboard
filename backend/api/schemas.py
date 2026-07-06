@@ -23,3 +23,8 @@ class StrategyRequest(BaseModel):
     legs: List[StrategyLeg]
     iv_source: str = "auto"
     dividend_yield: Optional[float] = None
+
+
+class VisitRequest(BaseModel):
+    ticker: str
+    iv_source: str = "auto"

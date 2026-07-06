@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend import services, strategy
-from backend.api.schemas import StrategyLeg, StrategyRequest
+from backend.api.schemas import StrategyLeg, StrategyRequest, VisitRequest
 from backend.data.alpaca import AlpacaError
 from backend.data.yfinance_client import YFinanceError
 
@@ -113,3 +113,27 @@ def strategy_price(req: StrategyRequest):
         raise HTTPException(status_code=400, detail="no legs supplied")
     return _guard(services.price_strategy, req.ticker, legs, req.iv_source,
                   req.dividend_yield)
+
+
+@app.post("/api/history/record")
+def history_record(req: VisitRequest):
+    return _guard(services.record_visit, req.ticker, req.iv_source)
+
+
+@app.get("/api/history/visits")
+def history_visits(ticker: str | None = None,
+                   limit: int = Query(200, ge=1, le=2000)):
+    return _guard(services.history_visits, ticker, limit)
+
+
+@app.get("/api/history/tickers")
+def history_tickers():
+    return _guard(services.history_tickers)
+
+
+@app.get("/api/history/series")
+def history_series(tickers: str, metric: str = "atm_iv"):
+    tlist = [t.strip() for t in tickers.split(",") if t.strip()]
+    if not tlist:
+        raise HTTPException(status_code=400, detail="no tickers supplied")
+    return _guard(services.history_series, tlist, metric)

@@ -23,6 +23,7 @@ from backend.data import alpaca, dividends, normalize, rates, yfinance_client
 from backend.data.alpaca import AlpacaError
 from backend.data.yfinance_client import YFinanceError
 from backend import analytics, strategy
+from backend.storage import db
 
 _CHAIN_TTL = 180  # seconds
 _BARS_TTL = 900
@@ -391,3 +392,42 @@ def price_strategy(ticker, legs, iv_source="auto", dividend_override=None):
         },
         "payoff": {"underlying": xs, "curves": curves_payload},
     }
+
+
+# ----------------------------------------------------------------------
+# History (SQLite-backed)
+# ----------------------------------------------------------------------
+def record_visit(ticker, iv_source="auto"):
+    """
+    Compute the key metrics for a ticker and store one visit row. The frontend
+    calls this when the user actively examines a ticker; recording is explicit so
+    tab-switches and cache hits do not pad the history.
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    closes = _load_closes(ticker)
+    rv = analytics.realized_vol_windows(closes)
+    rank = analytics.realized_vol_rank(closes)
+    exp_dates, exp_strs = nearest_expiration_dates(ticker, 1)
+    chain, _, _, _ = _load_chain(ticker, exp_strs, exp_dates, iv_source, None,
+                                 strike_band=0.3)
+    metrics = {
+        "spot": chain.spot,
+        "atm_iv": analytics.atm_iv(chain),
+        "rv_10": rv.get(10), "rv_20": rv.get(20),
+        "rv_30": rv.get(30), "rv_60": rv.get(60),
+        "iv_rank": rank.get("rank") if rank else None,
+        "iv_percentile": rank.get("percentile") if rank else None,
+    }
+    return db.record_visit(ticker, metrics, now.isoformat())
+
+
+def history_visits(ticker=None, limit=200):
+    return {"visits": db.list_visits(ticker, limit)}
+
+
+def history_tickers():
+    return {"tickers": db.distinct_tickers()}
+
+
+def history_series(tickers, metric):
+    return {"metric": metric, "series": db.metric_series(tickers, metric)}
