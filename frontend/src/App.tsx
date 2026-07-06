@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import TopBar from './components/TopBar'
 import ChainPage from './pages/ChainPage'
+import AnalysisPage from './pages/AnalysisPage'
 import Placeholder from './pages/Placeholder'
 
 const PAGES = [
@@ -25,10 +26,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/chain" replace />} />
         <Route path="/chain" element={<ChainPage />} />
-        <Route
-          path="/analysis"
-          element={<Placeholder title="Analysis" sub="Volatility surface, smile, and realized vs implied" />}
-        />
+        <Route path="/analysis" element={<AnalysisPage />} />
         <Route
           path="/strategy"
           element={<Placeholder title="Strategy" sub="Multi-leg builder, presets, and the time-aware payoff" />}

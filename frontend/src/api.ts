@@ -66,6 +66,31 @@ export interface Assumptions {
   dividend: { value: number; source: string }
 }
 
+export interface SurfacePoint { strike: number; expiration: string; tenor: number; iv: number }
+export interface SurfaceResponse {
+  ticker: string; spot: number | null; as_of: string
+  expirations: string[]; points: SurfacePoint[]
+}
+
+export interface SmilePoint {
+  strike: number; iv: number; type: 'call' | 'put'; in_the_money: boolean | null
+}
+export interface SmileResponse {
+  ticker: string; expiration: string; spot: number | null; as_of: string
+  points: SmilePoint[]
+}
+
+export interface RealizedVsImplied {
+  ticker: string
+  realized_vol: Record<string, number | null>
+  iv_rank: IvRank | null
+  atm_iv: number | null
+  atm_expiration: string
+  spot: number | null
+}
+
+export interface ExpirationsResponse { ticker: string; expirations: string[] }
+
 async function get<T>(path: string, params: Record<string, string | number | undefined>): Promise<T> {
   const q = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -85,4 +110,11 @@ export const api = {
     get<ChainResponse>('chain', { ticker, iv_source: ivSource, num_expirations: numExpirations }),
   assumptions: (ticker: string) => get<Assumptions>('assumptions', { ticker }),
   marketStatus: () => get<MarketStatus>('market-status', {}),
+  expirations: (ticker: string) => get<ExpirationsResponse>('expirations', { ticker }),
+  surface: (ticker: string, ivSource: string, maxExpirations = 8) =>
+    get<SurfaceResponse>('analysis/surface', { ticker, iv_source: ivSource, max_expirations: maxExpirations }),
+  smile: (ticker: string, expiration: string, ivSource: string) =>
+    get<SmileResponse>('analysis/smile', { ticker, expiration, iv_source: ivSource }),
+  realizedVsImplied: (ticker: string) =>
+    get<RealizedVsImplied>('analysis/realized-vs-implied', { ticker }),
 }
