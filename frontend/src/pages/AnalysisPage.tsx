@@ -219,6 +219,42 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
   const violations = arb.violations
   const arbTotal = arb.counts.butterfly + arb.counts.calendar
 
+  // ATM term structure: ATM vol by maturity. Linked to the SVI toggle — when the
+  // overlay is on and slices calibrated, the line follows the smoother fitted ATM;
+  // otherwise it follows the raw ATM interpolated at each forward.
+  const termPts = [...data.term_structure.points].sort((a, b) => a.tenor - b.tenor)
+  const hasTerm = termPts.filter((p) => p.atm_raw != null).length >= 2
+  const hasSviAtm = termPts.some((p) => p.atm_svi != null)
+  const useSviLine = sviOn && hasSviAtm
+  const termX = termPts.map((p) => p.tenor)
+  const termText = termPts.map((p) => p.expiration)
+  const termLineY = termPts.map((p) => {
+    const v = useSviLine ? (p.atm_svi ?? p.atm_raw) : p.atm_raw
+    return v != null ? v * 100 : null
+  })
+  const termRawY = termPts.map((p) => (p.atm_raw != null ? p.atm_raw * 100 : null))
+  const termData = [
+    {
+      type: 'scatter', mode: 'lines+markers', name: useSviLine ? 'SVI ATM' : 'ATM IV',
+      x: termX, y: termLineY, text: termText, connectgaps: true,
+      line: { color: c.accent, width: 2, shape: useSviLine ? 'spline' : 'linear' },
+      marker: { color: c.accent, size: 7 },
+      hovertemplate: '%{text}<br>T %{x:.3f}y<br>ATM IV %{y:.2f}%<extra></extra>',
+    },
+    ...(useSviLine ? [{
+      type: 'scatter', mode: 'markers', name: 'raw ATM',
+      x: termX, y: termRawY, text: termText,
+      marker: { color: c.muted, size: 5, symbol: 'circle-open' },
+      hovertemplate: '%{text}<br>raw ATM %{y:.2f}%<extra></extra>',
+    }] : []),
+  ]
+  const termLayout = {
+    ...baseLayout(), height: 300, showlegend: useSviLine,
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12, yanchor: 'bottom', bgcolor: 'rgba(0,0,0,0)', font: { color: c.muted, size: 11 } },
+    xaxis: { ...baseLayout().xaxis, title: { text: 'Time to expiry (years)' } },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'ATM implied vol %' } },
+  }
+
   return (
     <>
     <div className="chart-card">
@@ -246,6 +282,22 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
         {showArb ? ' Red × marks flag arbitrage violations on the raw surface (see report below).' : ''}
       </div>
     </div>
+    {hasTerm && (
+      <div className="chart-card" style={{ marginTop: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: 13 }}>ATM term structure</strong>
+          <span className="dim" style={{ fontSize: 12 }}>
+            {useSviLine ? 'ATM vol read from the SVI fit at each expiration' : 'ATM vol interpolated at the forward for each expiration'}
+          </span>
+        </div>
+        <Plot key={themeKey + '-term' + (useSviLine ? '-svi' : '')} data={termData} layout={termLayout} config={plotConfig}
+          style={{ width: '100%', height: 300 }} useResizeHandler />
+        <div className="chart-note">
+          ATM implied vol by maturity. An upward slope prices more uncertainty further out; an inverted, downward slope signals near-term stress.
+          {sviOn && !hasSviAtm ? ' No slices calibrated, so this shows raw ATM.' : ''}
+        </div>
+      </div>
+    )}
     <div className="chart-card" style={{ marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
         <strong style={{ fontSize: 13 }}>Arbitrage report</strong>
