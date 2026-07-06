@@ -4,7 +4,7 @@ import ChainPage from './pages/ChainPage'
 import AnalysisPage from './pages/AnalysisPage'
 import ContractPage from './pages/ContractPage'
 import StrategyPage from './pages/StrategyPage'
-import Placeholder from './pages/Placeholder'
+import HistoryPage from './pages/HistoryPage'
 
 const PAGES = [
   { to: '/chain', label: 'Chain' },
@@ -31,10 +31,7 @@ export default function App() {
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/strategy" element={<StrategyPage />} />
         <Route path="/contract" element={<ContractPage />} />
-        <Route
-          path="/history"
-          element={<Placeholder title="History" sub="Past visits, any metric over time, cross-ticker compare" />}
-        />
+        <Route path="/history" element={<HistoryPage />} />
       </Routes>
     </div>
   )

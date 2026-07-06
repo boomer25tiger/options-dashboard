@@ -171,6 +171,14 @@ export interface StrategyResponse {
   payoff: { underlying: number[]; curves: Record<string, number[]> }
 }
 
+export interface Visit {
+  id: number; ticker: string; timestamp: string
+  spot: number | null; atm_iv: number | null
+  rv_10: number | null; rv_20: number | null; rv_30: number | null; rv_60: number | null
+  iv_rank: number | null; iv_percentile: number | null
+}
+export interface SeriesPoint { timestamp: string; value: number | null }
+
 async function get<T>(path: string, params: Record<string, string | number | undefined>): Promise<T> {
   const q = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -201,6 +209,13 @@ export const api = {
     get<ContractDetail>('contract', { ticker, symbol, iv_source: ivSource }),
   strategyPrice: (ticker: string, legs: StrategyLegInput[], ivSource: string) =>
     post<StrategyResponse>('strategy/price', { ticker, legs, iv_source: ivSource }),
+  historyTickers: () => get<{ tickers: string[] }>('history/tickers', {}),
+  historyVisits: (ticker?: string, limit = 300) =>
+    get<{ visits: Visit[] }>('history/visits', { ticker, limit }),
+  historySeries: (tickers: string[], metric: string) =>
+    get<{ metric: string; series: Record<string, SeriesPoint[]> }>('history/series', { tickers: tickers.join(','), metric }),
+  historyRecord: (ticker: string, ivSource: string) =>
+    post<Visit>('history/record', { ticker, iv_source: ivSource }),
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {

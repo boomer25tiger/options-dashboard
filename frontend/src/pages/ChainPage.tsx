@@ -6,6 +6,10 @@ import { money, pct, int, greek, signClass, timeAgo, DASH } from '../format'
 
 type Tab = 'calls' | 'puts' | 'combined'
 
+// Record a history visit once per ticker per app session, so history accrues
+// naturally as the user browses the Chain.
+const recordedThisSession = new Set<string>()
+
 export default function ChainPage() {
   const { ticker, ivSource, selectedContract, setSelectedContract } = useStore()
   const [numExpirations] = useState(6)
@@ -23,6 +27,13 @@ export default function ChainPage() {
       setExpiration(data.expirations[0] ?? null)
     }
   }, [data, expiration])
+
+  useEffect(() => {
+    if (data && !recordedThisSession.has(ticker)) {
+      recordedThisSession.add(ticker)
+      api.historyRecord(ticker, ivSource).catch(() => { /* best effort */ })
+    }
+  }, [data, ticker, ivSource])
 
   const spot = data?.spot ?? null
 

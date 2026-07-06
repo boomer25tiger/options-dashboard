@@ -113,11 +113,11 @@ function PricingTab({ d, dte }: { d: ContractDetail; dte: number | null }) {
 
       <div className="section-h">Greeks (Black-Scholes analytical)</div>
       <div className="kv-grid">
-        <div className="kv2"><span className="lbl">Delta</span><span className="v">{greek(g.delta)}</span></div>
-        <div className="kv2"><span className="lbl">Gamma</span><span className="v">{greek(g.gamma, 4)}</span></div>
-        <div className="kv2"><span className="lbl">Vega · per 1%</span><span className="v">{greek(g.vega)}</span></div>
-        <div className="kv2"><span className="lbl">Theta · per day</span><span className="v">{greek(g.theta)}</span></div>
-        <div className="kv2"><span className="lbl">Rho · per 1%</span><span className="v">{greek(g.rho)}</span></div>
+        <div className="kv2"><span className="lbl gk">Δ (delta)</span><span className="v">{greek(g.delta)}</span></div>
+        <div className="kv2"><span className="lbl gk">Γ (gamma)</span><span className="v">{greek(g.gamma, 4)}</span></div>
+        <div className="kv2"><span className="lbl gk">ν (vega) · per 1%</span><span className="v">{greek(g.vega)}</span></div>
+        <div className="kv2"><span className="lbl gk">θ (theta) · per day</span><span className="v">{greek(g.theta)}</span></div>
+        <div className="kv2"><span className="lbl gk">ρ (rho) · per 1%</span><span className="v">{greek(g.rho)}</span></div>
       </div>
     </div>
   )

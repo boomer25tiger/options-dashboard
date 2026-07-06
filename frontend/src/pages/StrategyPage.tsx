@@ -263,11 +263,11 @@ function StrategyResult({ data }: { data: StrategyResponse }) {
       <div className="section-h">Breakevens &amp; net Greeks</div>
       <div className="kv-grid">
         <div className="kv2"><span className="lbl">Breakeven(s)</span><span className="v">{s.breakevens.length ? s.breakevens.map((b) => b.toFixed(2)).join(', ') : '—'}</span></div>
-        <div className="kv2"><span className="lbl">Delta</span><span className="v">{greek(g.delta, 1)}</span></div>
-        <div className="kv2"><span className="lbl">Gamma</span><span className="v">{greek(g.gamma, 3)}</span></div>
-        <div className="kv2"><span className="lbl">Vega · per 1%</span><span className="v">{greek(g.vega, 1)}</span></div>
-        <div className="kv2"><span className="lbl">Theta · per day</span><span className="v">{greek(g.theta, 1)}</span></div>
-        <div className="kv2"><span className="lbl">Rho · per 1%</span><span className="v">{greek(g.rho, 1)}</span></div>
+        <div className="kv2"><span className="lbl gk">Δ (delta)</span><span className="v">{greek(g.delta, 1)}</span></div>
+        <div className="kv2"><span className="lbl gk">Γ (gamma)</span><span className="v">{greek(g.gamma, 3)}</span></div>
+        <div className="kv2"><span className="lbl gk">ν (vega) · per 1%</span><span className="v">{greek(g.vega, 1)}</span></div>
+        <div className="kv2"><span className="lbl gk">θ (theta) · per day</span><span className="v">{greek(g.theta, 1)}</span></div>
+        <div className="kv2"><span className="lbl gk">ρ (rho) · per 1%</span><span className="v">{greek(g.rho, 1)}</span></div>
       </div>
 
       <div className="chart-card">
@@ -283,7 +283,8 @@ function StrategyResult({ data }: { data: StrategyResponse }) {
           <thead>
             <tr>
               <th className="l">Leg</th><th>Price</th><th>Cost</th>
-              <th>Δ</th><th>Γ</th><th>Vega</th><th>Θ/day</th><th>Rho</th>
+              <th className="gk">Δ (delta)</th><th className="gk">Γ (gamma)</th>
+              <th className="gk">ν (vega)</th><th className="gk">θ (theta)</th><th className="gk">ρ (rho)</th>
             </tr>
           </thead>
           <tbody>
