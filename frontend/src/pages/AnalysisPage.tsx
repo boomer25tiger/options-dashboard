@@ -77,6 +77,7 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
   })
   const c = plotColors()
   const [sviOn, setSviOn] = useState(false)
+  const [arbOn, setArbOn] = useState(true)
 
   const grid = useMemo(() => {
     if (!data) return null
@@ -126,6 +127,35 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     return { x: pts.map((p) => p.strike), y: pts.map((p) => p.tenor), z: pts.map((p) => p.iv * 100) }
   }, [data])
 
+  // Place a marker at each raw-surface arbitrage violation. Butterfly gives an
+  // exact strike; calendar gives a log-moneyness, so approximate its strike from
+  // spot. The height is the raw IV interpolated at that strike/expiration.
+  const arbMarkers = useMemo(() => {
+    if (!data) return null
+    const spot = data.spot ?? 0
+    const viol = data.arbitrage.violations
+    if (!viol.length) return null
+    const byExp = new Map<string, { strike: number; iv: number }[]>()
+    for (const p of data.points) {
+      if (!(p.iv > 0 && p.iv <= 0.8)) continue
+      const a = byExp.get(p.expiration) ?? []
+      a.push({ strike: p.strike, iv: p.iv })
+      byExp.set(p.expiration, a)
+    }
+    for (const a of byExp.values()) a.sort((x, y) => x.strike - y.strike)
+    const x: number[] = [], y: number[] = [], z: number[] = [], text: string[] = []
+    for (const v of viol) {
+      const K = v.strike != null ? v.strike : (spot && v.moneyness != null ? spot * Math.exp(v.moneyness) : null)
+      if (K == null) continue
+      const pts = byExp.get(v.expiration)
+      const iv = pts ? lerp(pts, K) : null
+      if (iv == null) continue
+      x.push(K); y.push(v.tenor); z.push(iv * 100)
+      text.push(v.type === 'butterfly' ? `Butterfly · K ${K.toFixed(0)}` : `Calendar · ${(v.moneyness ?? 0) >= 0 ? '+' : ''}${((v.moneyness ?? 0) * 100).toFixed(0)}% mny`)
+    }
+    return x.length ? { x, y, z, text } : null
+  }, [data])
+
   if (isLoading) return <Loading label={`Loading surface for ${ticker}…`} />
   if (isError) return <Failed error={error} />
   if (!data) return null
@@ -156,9 +186,17 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     marker: { size: 1.8, color: c.text, opacity: 0.55 },
     hovertemplate: 'K %{x:.0f}<br>T %{y:.3f}y<br>IV %{z:.1f}% (raw)<extra></extra>',
   } : null
+  const arbTrace = arbMarkers ? {
+    type: 'scatter3d', mode: 'markers', x: arbMarkers.x, y: arbMarkers.y, z: arbMarkers.z,
+    marker: { size: 5, color: c.neg, symbol: 'x', line: { color: c.neg, width: 1 } },
+    text: arbMarkers.text,
+    hovertemplate: '%{text}<br>IV %{z:.1f}%<extra>arbitrage</extra>',
+  } : null
 
   const showSvi = sviOn && !!sviSurface
-  const traces = showSvi ? [sviSurface, rawPts].filter(Boolean) : [rawSurface]
+  const showArb = arbOn && !!arbTrace
+  const base = showSvi ? [sviSurface, rawPts].filter(Boolean) : [rawSurface]
+  const traces = showArb ? [...base, arbTrace] : base
 
   const axis = {
     color: c.muted, gridcolor: c.grid, zerolinecolor: c.grid,
@@ -177,13 +215,22 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
   }
   const fittedCount = data.svi.slices.filter((s) => s.ok).length
   const totalSlices = data.svi.slices.length
+  const arb = data.arbitrage
+  const violations = arb.violations
+  const arbTotal = arb.counts.butterfly + arb.counts.calendar
 
   return (
+    <>
     <div className="chart-card">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6, flexWrap: 'wrap' }}>
         <button className={`btn ${sviOn ? 'accent' : ''}`} onClick={() => setSviOn((v) => !v)}>
           SVI fit overlay {sviOn ? 'on' : 'off'}
         </button>
+        {arbMarkers && (
+          <button className={`btn ${arbOn ? 'accent' : ''}`} onClick={() => setArbOn((v) => !v)}>
+            Arbitrage flags {arbOn ? 'on' : 'off'}
+          </button>
+        )}
         {sviOn && (
           <span className="dim" style={{ fontSize: 12 }}>
             {sviGrid ? `Fitted ${fittedCount} of ${totalSlices} slices${fittedCount < totalSlices ? ' (sparse slices hidden)' : ''}` : 'SVI fit unavailable for this chain'}
@@ -196,8 +243,50 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
         {showSvi
           ? 'SVI-fitted surface (continuous mesh) with the raw market IV points scattered on top. A point sitting off the mesh flags a data problem or a genuine dislocation; slices that fail to calibrate are hidden.'
           : 'Raw IV across strike and expiration (near-money band), interpolated to a grid with contour lines. Toggle the SVI fit for a calibrated overlay. Drag to rotate, scroll to zoom.'}
+        {showArb ? ' Red × marks flag arbitrage violations on the raw surface (see report below).' : ''}
       </div>
     </div>
+    <div className="chart-card" style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 13 }}>Arbitrage report</strong>
+        <span className="dim" style={{ fontSize: 12 }}>
+          {arbTotal
+            ? `${arb.counts.butterfly} butterfly, ${arb.counts.calendar} calendar on the raw surface`
+            : 'No calendar or butterfly violations on the raw surface'}
+        </span>
+      </div>
+      {arb.truncated && (
+        <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>Showing the 20 largest butterfly violations.</div>
+      )}
+      {violations.length > 0 && (
+        <div className="table-wrap" style={{ marginTop: 8, maxHeight: 320, minHeight: 0 }}>
+          <table className="chain">
+            <thead>
+              <tr>
+                <th className="l">Type</th>
+                <th className="l">Expiration</th>
+                <th>Location</th>
+                <th className="l">Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {violations.map((v, i) => (
+                <tr key={`${v.type}-${v.expiration}-${v.strike ?? v.moneyness}-${i}`}>
+                  <td style={{ textAlign: 'left', fontWeight: 700, textTransform: 'capitalize', color: v.type === 'butterfly' ? cssVar('--accent') : cssVar('--neg') }}>{v.type}</td>
+                  <td style={{ textAlign: 'left' }}>{v.expiration}</td>
+                  <td>{v.strike != null ? v.strike.toFixed(0) : v.moneyness != null ? `${v.moneyness >= 0 ? '+' : ''}${(v.moneyness * 100).toFixed(0)}%` : '—'}</td>
+                  <td style={{ textAlign: 'left', whiteSpace: 'normal', fontFamily: 'inherit', color: cssVar('--text-dim'), minWidth: 280 }}>{v.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="chart-note" style={{ marginTop: 8 }}>
+        Calendar checks that total implied variance rises with maturity at fixed moneyness; butterfly checks that call prices stay convex in strike. Both run on the raw chain, so most flags are stale or crossed quotes rather than tradeable edges.
+      </div>
+    </div>
+    </>
   )
 }
 
