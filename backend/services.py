@@ -16,14 +16,15 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 from pricing_engine import (  # noqa: E402
-    binomial_price, bs_price, breakeven_long_option, prob_itm,
+    binomial_price, bs_price, breakeven_long_option, implied_vol, prob_itm,
     prob_profit_long_option,
 )
+from heston import heston_price  # noqa: E402
 
 from backend.data import alpaca, dividends, normalize, rates, yfinance_client
 from backend.data.alpaca import AlpacaError
 from backend.data.yfinance_client import YFinanceError
-from backend import analytics, commentary, strategy
+from backend import analytics, commentary, heston_calib, strategy
 from backend import surface as surface_mod
 from backend.storage import db
 
@@ -339,6 +340,90 @@ def surface(ticker, max_expirations=8, iv_source="auto"):
         "expirations": [d.isoformat() for d in chain.expirations],
         "points": analytics.surface_points(chain),
         "svi": svi, "arbitrage": arb, "term_structure": term,
+    }
+
+
+_HESTON_TTL = 300  # calibration is expensive and the chain is slow-moving
+
+
+def _heston_surface_grid(params, spot, rate_fn, q, tenor_lo, tenor_hi):
+    """Heston-implied vol mesh over a near-money band and the calibrated tenor span."""
+    v0, kappa, theta, xi, rho = (params[k] for k in ("v0", "kappa", "theta", "xi", "rho"))
+    strikes = [spot * 0.8 + spot * 0.4 * i / 39 for i in range(40)]
+    tenors = [tenor_lo + (tenor_hi - tenor_lo) * j / 15 for j in range(16)]
+    z = []
+    for T in tenors:
+        r = rate_fn(T)
+        row = []
+        for K in strikes:
+            price = heston_price(spot, K, T, r, v0, kappa, theta, xi, rho, "call", q)
+            iv = implied_vol(price, spot, K, T, r, "call", q)
+            row.append(round(iv * 100, 3) if iv else None)
+        z.append(row)
+    return {"strikes": [round(s, 2) for s in strikes],
+            "tenors": [round(t, 4) for t in tenors], "z": z}
+
+
+def heston_calibration(ticker):
+    """Calibrate Heston to a maturity-diverse slice of the chain. Cached per ticker."""
+    def produce():
+        all_dates, _ = nearest_expiration_dates(ticker, 60)
+        chosen = heston_calib.select_expirations(all_dates, dt.date.today())
+        if len(chosen) < 3:
+            return {"ok": False, "reason": "not enough distinct maturities",
+                    "spot": None, "as_of": None, "surface": None, "points": []}
+        chosen_strs = [d.isoformat() for d in chosen]
+        chain, meta, rate_fn, now = _load_chain(ticker, chosen_strs, chosen, "auto",
+                                                None, strike_band=0.5)
+        spot = chain.spot
+        q = meta["dividend"]["value"]
+        result = heston_calib.calibrate_from_chain(chain, spot, rate_fn, q)
+        result["spot"] = spot
+        result["as_of"] = meta["as_of"]
+        result["points"] = analytics.surface_points(chain)
+        if result.get("ok") and result.get("per_expiration"):
+            tenors = [pe["tenor"] for pe in result["per_expiration"]]
+            result["surface"] = _heston_surface_grid(result["params"], spot, rate_fn,
+                                                      q, min(tenors), max(tenors))
+        else:
+            result["surface"] = None
+        return result
+
+    return _cached(("heston", ticker), _HESTON_TTL, produce)
+
+
+def contract_heston(ticker, symbol):
+    """Heston price for one contract from the cached whole-chain calibration."""
+    _, exp, otype, strike = alpaca.parse_occ_symbol(symbol)
+    chain, meta, _, _ = _load_chain(ticker, [exp.isoformat()], [exp], "auto", None,
+                                    strike_band=0.5)
+    match = next((c for c in chain.contracts if c.symbol == symbol), None)
+    if match is None:
+        match = next((c for c in chain.contracts
+                      if c.option_type == otype and abs(c.strike - strike) < 1e-6
+                      and c.expiration == exp), None)
+    if match is None:
+        raise NotFound(f"contract {symbol} not found in chain")
+
+    S, K, T, r, sigma = chain.spot, match.strike, match.time_to_expiry, match.rate_used, match.iv
+    q = meta["dividend"]["value"]
+    calib = heston_calibration(ticker)
+    if not calib.get("ok"):
+        return {"ok": False, "reason": calib.get("reason") or "calibration unavailable",
+                "price": None, "iv": None, "iv_rmse": calib.get("iv_rmse"),
+                "params": None, "read": None}
+
+    p = calib["params"]
+    price = heston_iv = None
+    if S and T and T > 0:
+        price = heston_price(S, K, T, r, p["v0"], p["kappa"], p["theta"], p["xi"],
+                             p["rho"], otype, q)
+        heston_iv = implied_vol(price, S, K, T, r, otype, q)
+    return {
+        "ok": True, "price": price, "iv": heston_iv, "market_iv": sigma,
+        "iv_rmse": calib.get("iv_rmse"), "feller_ok": calib.get("feller_ok"),
+        "params": p,
+        "read": commentary.heston_contract_read(price, heston_iv, sigma, calib.get("iv_rmse")),
     }
 
 

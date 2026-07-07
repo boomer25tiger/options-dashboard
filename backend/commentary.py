@@ -288,3 +288,36 @@ def term_structure_read(points):
               f"{back[1] * 100:.1f}% at {bd}d, a {abs(diff):.1f}-point {move} with "
               f"maturity. {interp}")
     return {"headline": headline, "detail": detail}
+
+
+def heston_contract_read(price, heston_iv, market_iv, fit_iv_rmse):
+    """
+    Where a single contract sits against the whole-chain Heston fit. Compares the
+    Heston-implied vol with the contract's own market implied vol, and only calls it
+    cheap or rich when the gap clears the fit's own error, so surface noise is not
+    dressed up as a dislocation.
+    """
+    if price is None or heston_iv is None or market_iv is None:
+        return None
+    diff = (heston_iv - market_iv) * 100.0  # vol points, model minus market
+    tol = max(0.3, (fit_iv_rmse or 0.0) * 100.0)
+    if abs(diff) <= tol:
+        return {
+            "headline": "In line with the calibrated surface",
+            "detail": (f"Heston, fit to the whole chain, values it ${price:.2f}, within "
+                       f"the fit's own {tol:.1f} vol-point tolerance of the contract's "
+                       f"implied vol. No dislocation against the surface."),
+        }
+    if diff > 0:
+        return {
+            "headline": "Screens cheap versus the surface",
+            "detail": (f"Heston values it ${price:.2f}, {diff:.1f} vol points above the "
+                       f"contract's own implied vol, so the market is pricing it below "
+                       f"the surface the model fits."),
+        }
+    return {
+        "headline": "Screens rich versus the surface",
+        "detail": (f"Heston values it ${price:.2f}, {abs(diff):.1f} vol points below the "
+                   f"contract's own implied vol, so the market is pricing it above the "
+                   f"fitted surface."),
+    }

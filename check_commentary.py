@@ -8,7 +8,8 @@ Run:  python3 check_commentary.py
 import sys
 
 from backend.commentary import (
-    contract_read, realized_implied_read, strategy_read, term_structure_read,
+    contract_read, heston_contract_read, realized_implied_read, strategy_read,
+    term_structure_read,
 )
 
 _PASSES, _FAILS = [], []
@@ -208,6 +209,27 @@ check("noisy 0DTE front is skipped for the front reference",
 
 check("single point returns None", term_structure_read([_tp(0.05, 0.12)]) is None)
 check("no points returns None", term_structure_read([]) is None)
+
+
+hr("Heston contract read: contract versus the calibrated surface")
+
+# fit RMSE 1.4 vol points -> tolerance band 1.4 vol points.
+inline = heston_contract_read(5.44, 0.1505, 0.1477, 0.014)
+check("gap inside the fit tolerance reads as in line",
+      inline["headline"] == "In line with the calibrated surface", inline["detail"])
+
+rich = heston_contract_read(10.52, 0.1238, 0.1422, 0.014)
+check("market vol above the Heston fit screens rich",
+      rich["headline"] == "Screens rich versus the surface"
+      and "1.8 vol points below" in rich["detail"], rich["detail"])
+
+cheap = heston_contract_read(3.0, 0.180, 0.150, 0.014)
+check("market vol below the Heston fit screens cheap",
+      cheap["headline"] == "Screens cheap versus the surface"
+      and "3.0 vol points above" in cheap["detail"], cheap["detail"])
+
+check("missing Heston price returns None", heston_contract_read(None, 0.15, 0.15, 0.01) is None)
+check("missing market iv returns None", heston_contract_read(5.0, 0.15, None, 0.01) is None)
 
 
 hr("RESULT")

@@ -109,6 +109,16 @@ def smile(ticker: str, expiration: str, iv_source: str = "auto"):
     return _guard(services.smile, ticker, expiration, iv_source)
 
 
+@app.get("/api/analysis/heston")
+def heston(ticker: str):
+    return _guard(services.heston_calibration, ticker)
+
+
+@app.get("/api/contract/heston")
+def contract_heston(ticker: str, symbol: str):
+    return _guard(services.contract_heston, ticker, symbol)
+
+
 @app.post("/api/strategy/price")
 def strategy_price(req: StrategyRequest):
     legs = [_to_leg(leg) for leg in req.legs]
