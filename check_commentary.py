@@ -7,7 +7,7 @@ Run:  python3 check_commentary.py
 """
 import sys
 
-from backend.commentary import realized_implied_read
+from backend.commentary import realized_implied_read, strategy_read
 
 _PASSES, _FAILS = [], []
 
@@ -84,6 +84,62 @@ check("zero realized returns None", realized_implied_read(0.18, 0.0) is None)
 
 check("assumption is always stated",
       rich["assumption"].startswith("Assumes") and cheap["assumption"].startswith("Assumes"))
+
+
+# Live-shaped strategy summaries (greeks already display-scaled: vega per vol
+# point, theta per day), taken from real SPY responses.
+BULL = {"net_cost": 765.92,
+        "greeks": {"delta": 20.98, "gamma": -0.044, "vega": 3.60, "theta": -3.27, "rho": 12.74},
+        "breakevens": [752.66], "max_profit": 734.08, "max_loss": -765.92,
+        "prob_of_profit": 0.4552}
+STRADDLE = {"net_cost": -2370.68,
+            "greeks": {"delta": -1.36, "gamma": -2.68, "vega": -174.24, "theta": 37.88, "rho": 1.16},
+            "breakevens": [726.29, 773.71], "max_profit": 2370.68, "max_loss": None,
+            "prob_of_profit": 0.5737}
+LONG_CALL = {"net_cost": 300.0,
+             "greeks": {"delta": 50.0, "gamma": 0.5, "vega": 15.0, "theta": -8.0, "rho": 4.0},
+             "breakevens": [753.0], "max_profit": None, "max_loss": -300.0,
+             "prob_of_profit": 0.40}
+
+
+hr("Strategy read: dominant exposure and risk character")
+
+bull = strategy_read(BULL, 750.0, "SPY")
+check("directional position reads as a bullish tilt", bull["theme"] == "bull", bull["headline"])
+check("bounded loss reads as defined risk", bull["headline"].startswith("Defined-risk"))
+check("bull detail names the debit and reward-to-risk",
+      "net debit" in bull["detail"] and "reward-to-risk" in bull["detail"])
+check("bull detail translates delta into a dollar move",
+      "1% move in SPY is worth about $157" in bull["detail"], bull["detail"])
+check("bull carries no open-ended-risk flag", bull["flag"] is None)
+
+straddle = strategy_read(STRADDLE, 750.0, "SPY")
+check("vol-dominated short premium reads as short-volatility",
+      straddle["theme"] == "shortvol", straddle["headline"])
+check("unbounded loss flags open risk",
+      straddle["flag"] == "risk" and straddle["headline"].startswith("Open-risk"))
+check("straddle names the credit and open-ended downside",
+      "net credit" in straddle["detail"] and "open-ended downside" in straddle["detail"])
+check("straddle: short vega gains if implied vol falls",
+      "short vega" in straddle["detail"] and "implied vol falls" in straddle["detail"])
+check("straddle: positive theta reads as carry in your favor",
+      "in your favor" in straddle["detail"])
+
+lc = strategy_read(LONG_CALL, 750.0, "SPY")
+check("long call keeps defined risk with open-ended upside",
+      lc["headline"].startswith("Defined-risk") and lc["flag"] is None
+      and "open-ended upside" in lc["detail"], lc["detail"])
+
+flat = strategy_read({"net_cost": 5.0, "greeks": {"delta": 0.2, "vega": 0.1, "theta": 0.0},
+                      "max_profit": 50.0, "max_loss": -50.0, "prob_of_profit": 0.5}, 100.0)
+check("negligible exposures read as market-neutral", flat["theme"] == "neutral", flat["headline"])
+
+check("missing summary returns None", strategy_read(None, 750.0) is None)
+check("missing spot returns None", strategy_read(BULL, None) is None)
+check("summary without greeks returns None",
+      strategy_read({"greeks": {}, "net_cost": 1}, 750.0) is None)
+check("strategy note states the probability assumption",
+      bull["note"].startswith("Probability of profit is modeled"))
 
 
 hr("RESULT")

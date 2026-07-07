@@ -260,6 +260,14 @@ function StrategyResult({ data }: { data: StrategyResponse }) {
         </div>
       </div>
 
+      {data.read && (
+        <div className="verdict" style={{ marginTop: 12 }}>
+          <b className={data.read.flag === 'risk' ? 'neg' : ''}>{data.read.headline}.</b>{' '}
+          {data.read.detail}{' '}
+          <span className="dim">{data.read.note}</span>
+        </div>
+      )}
+
       <div className="section-h">Breakevens &amp; net Greeks</div>
       <div className="kv-grid">
         <div className="kv2"><span className="lbl">Breakeven(s)</span><span className="v">{s.breakevens.length ? s.breakevens.map((b) => b.toFixed(2)).join(', ') : '—'}</span></div>

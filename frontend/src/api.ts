@@ -173,6 +173,7 @@ export interface StrategyResponse {
     max_loss: number | null
     prob_of_profit: number | null
   }
+  read: { flag: 'risk' | null; theme: string; headline: string; detail: string; note: string } | null
   legs: Array<{
     option_type: 'call' | 'put' | 'stock'
     quantity: number

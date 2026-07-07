@@ -465,26 +465,29 @@ def price_strategy(ticker, legs, iv_source="auto", dividend_override=None):
         for (label, d), series_key in zip(labeled, [d for _, d in labeled]):
             curves_payload[label] = curves[series_key]
 
+    summary_out = {
+        "net_cost": summary["net_cost"],
+        "greeks": {
+            "delta": summary["greeks"]["delta"],
+            "gamma": summary["greeks"]["gamma"],
+            "vega": summary["greeks"]["vega"] / 100.0,
+            "theta": summary["greeks"]["theta"] / 365.0,
+            "rho": summary["greeks"]["rho"] / 100.0,
+        },
+        "greeks_units": GREEKS_UNITS,
+        "breakevens": summary["breakevens"],
+        "max_profit": summary["max_profit"],
+        "max_loss": summary["max_loss"],
+        "prob_of_profit": summary["prob_of_profit"],
+    }
+
     return {
         "ticker": ticker, "spot": spot, "as_of": now.isoformat(),
         "context": {"rate_source": rate_source, "rate_as_of": rate_asof,
                     "dividend": {"value": q, "source": q_source},
                     "iv_source": iv_source},
-        "summary": {
-            "net_cost": summary["net_cost"],
-            "greeks": {
-                "delta": summary["greeks"]["delta"],
-                "gamma": summary["greeks"]["gamma"],
-                "vega": summary["greeks"]["vega"] / 100.0,
-                "theta": summary["greeks"]["theta"] / 365.0,
-                "rho": summary["greeks"]["rho"] / 100.0,
-            },
-            "greeks_units": GREEKS_UNITS,
-            "breakevens": summary["breakevens"],
-            "max_profit": summary["max_profit"],
-            "max_loss": summary["max_loss"],
-            "prob_of_profit": summary["prob_of_profit"],
-        },
+        "summary": summary_out,
+        "read": commentary.strategy_read(summary_out, spot, ticker),
         "legs": strategy.leg_breakdown(legs, ctx),
         "payoff": {"underlying": xs, "curves": curves_payload},
     }
