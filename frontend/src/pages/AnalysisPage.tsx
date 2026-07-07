@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Plot from '../Plot'
 import { useStore } from '../store'
-import { api } from '../api'
+import { api, type HestonCalibration } from '../api'
 import { pct, money } from '../format'
 import { baseLayout, plotColors, ivColorscale, cssVar, plotConfig } from '../plotTheme'
 
@@ -70,6 +70,66 @@ function Failed({ error }: { error: unknown }) {
   return <div className="msg err">Failed to load: {(error as Error).message}</div>
 }
 
+function HestonPanel({ calib, loading }: { calib?: HestonCalibration; loading: boolean }) {
+  if (loading) return (
+    <div className="chart-card" style={{ marginTop: 12 }}>
+      <div className="msg"><span className="spin" />Calibrating Heston to the chain…</div>
+    </div>
+  )
+  if (!calib) return null
+  if (!calib.ok || !calib.params) return (
+    <div className="chart-card" style={{ marginTop: 12 }}>
+      <div className="msg">Heston calibration unavailable{calib.reason ? ` (${calib.reason})` : ''}.</div>
+    </div>
+  )
+  const p = calib.params
+  const vol = (v: number) => (Math.sqrt(v) * 100).toFixed(1) + '%'
+  return (
+    <div className="chart-card" style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 13 }}>Heston calibration</strong>
+        <span className="dim" style={{ fontSize: 12 }}>
+          fit {((calib.iv_rmse ?? 0) * 100).toFixed(1)} vol points across {calib.n_instruments} options · {calib.feller_ok ? 'Feller satisfied' : 'Feller violated'}
+        </span>
+      </div>
+      <div className="kv-grid">
+        <div className="kv2"><span className="lbl">Initial vol √v₀</span><span className="v">{vol(p.v0)}</span></div>
+        <div className="kv2"><span className="lbl">Long-run vol √θ</span><span className="v">{vol(p.theta)}</span></div>
+        <div className="kv2"><span className="lbl">Mean reversion κ</span><span className="v">{p.kappa.toFixed(2)}</span></div>
+        <div className="kv2"><span className="lbl">Vol of vol ξ</span><span className="v">{p.xi.toFixed(2)}</span></div>
+        <div className="kv2"><span className="lbl">Correlation ρ</span><span className="v">{p.rho.toFixed(2)}</span></div>
+      </div>
+      {calib.per_expiration && calib.per_expiration.length > 0 && (
+        <div className="table-wrap" style={{ marginTop: 10, maxHeight: 240, minHeight: 0 }}>
+          <table className="chain">
+            <thead>
+              <tr>
+                <th className="l">Expiration</th>
+                <th>Tenor</th>
+                <th>Options</th>
+                <th>Fit (vol pts)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {calib.per_expiration.map((pe) => (
+                <tr key={pe.expiration}>
+                  <td style={{ textAlign: 'left' }}>{pe.expiration}</td>
+                  <td>{pe.tenor.toFixed(3)}y</td>
+                  <td>{pe.n}</td>
+                  <td>{(pe.iv_rmse * 100).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="chart-note">
+        One stochastic-vol process fit to the whole chain across strikes and maturities. Negative ρ carries the equity skew, and √θ is the volatility the process reverts to. A single Heston cannot match every slice, so the fit error tends to widen at the long end.
+      </div>
+    </div>
+  )
+}
+
 function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: string; themeKey: string }) {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['surface', ticker, ivSource],
@@ -78,6 +138,16 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
   const c = plotColors()
   const [sviOn, setSviOn] = useState(false)
   const [arbOn, setArbOn] = useState(true)
+  const [hestonOn, setHestonOn] = useState(false)
+
+  // Heston calibration is expensive, so it loads only when its overlay is on.
+  const hestonQuery = useQuery({
+    queryKey: ['heston', ticker],
+    queryFn: () => api.heston(ticker),
+    enabled: hestonOn,
+    staleTime: 5 * 60 * 1000,
+  })
+  const calib = hestonQuery.data
 
   const grid = useMemo(() => {
     if (!data) return null
@@ -126,6 +196,19 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     const pts = data.points.filter((p) => p.iv > 0 && p.iv <= 0.8 && (!spot || (p.strike >= spot * 0.8 && p.strike <= spot * 1.2)))
     return { x: pts.map((p) => p.strike), y: pts.map((p) => p.tenor), z: pts.map((p) => p.iv * 100) }
   }, [data])
+
+  const hestonMesh = useMemo(() => {
+    const s = calib?.surface
+    if (!calib?.ok || !s) return null
+    return { x: s.strikes, y: s.tenors, z: s.z }
+  }, [calib])
+
+  const hestonPts = useMemo(() => {
+    if (!calib?.points || !calib.spot) return null
+    const spot = calib.spot
+    const pts = calib.points.filter((p) => p.iv > 0 && p.iv <= 0.8 && p.strike >= spot * 0.8 && p.strike <= spot * 1.2)
+    return { x: pts.map((p) => p.strike), y: pts.map((p) => p.tenor), z: pts.map((p) => p.iv * 100) }
+  }, [calib])
 
   // Place a marker at each raw-surface arbitrage violation. Butterfly gives an
   // exact strike; calendar gives a log-moneyness, so approximate its strike from
@@ -193,9 +276,26 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     hovertemplate: '%{text}<br>IV %{z:.1f}%<extra>arbitrage</extra>',
   } : null
 
-  const showSvi = sviOn && !!sviSurface
-  const showArb = arbOn && !!arbTrace
-  const base = showSvi ? [sviSurface, rawPts].filter(Boolean) : [rawSurface]
+  const hestonSurfaceTrace = hestonMesh ? {
+    type: 'surface', x: hestonMesh.x, y: hestonMesh.y, z: hestonMesh.z,
+    colorscale: ivColorscale(), showscale: true, opacity: 0.85, colorbar,
+    contours: { z: { show: true, usecolormap: true, width: 1.5 } },
+    lighting: { ambient: 0.85, diffuse: 0.45, specular: 0.06, roughness: 0.9 },
+    lightposition: { x: 100, y: 200, z: 350 },
+    hovertemplate: 'K %{x:.0f}<br>T %{y:.3f}y<br>IV %{z:.1f}% (Heston)<extra></extra>',
+  } : null
+  const hestonPtsTrace = hestonPts ? {
+    type: 'scatter3d', mode: 'markers', x: hestonPts.x, y: hestonPts.y, z: hestonPts.z,
+    marker: { size: 1.8, color: c.text, opacity: 0.55 },
+    hovertemplate: 'K %{x:.0f}<br>T %{y:.3f}y<br>IV %{z:.1f}% (raw)<extra></extra>',
+  } : null
+
+  const showHeston = hestonOn && !!hestonSurfaceTrace
+  const showSvi = sviOn && !showHeston && !!sviSurface
+  const showArb = arbOn && !showHeston && !!arbTrace
+  const base = showHeston
+    ? [hestonSurfaceTrace, hestonPtsTrace].filter(Boolean)
+    : showSvi ? [sviSurface, rawPts].filter(Boolean) : [rawSurface]
   const traces = showArb ? [...base, arbTrace] : base
 
   const axis = {
@@ -259,10 +359,13 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
     <>
     <div className="chart-card">
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6, flexWrap: 'wrap' }}>
-        <button className={`btn ${sviOn ? 'accent' : ''}`} onClick={() => setSviOn((v) => !v)}>
+        <button className={`btn ${sviOn ? 'accent' : ''}`} onClick={() => { setSviOn((v) => !v); setHestonOn(false) }}>
           SVI fit overlay {sviOn ? 'on' : 'off'}
         </button>
-        {arbMarkers && (
+        <button className={`btn ${hestonOn ? 'accent' : ''}`} onClick={() => { setHestonOn((v) => !v); setSviOn(false) }}>
+          Heston fit {hestonOn ? 'on' : 'off'}
+        </button>
+        {arbMarkers && !hestonOn && (
           <button className={`btn ${arbOn ? 'accent' : ''}`} onClick={() => setArbOn((v) => !v)}>
             Arbitrage flags {arbOn ? 'on' : 'off'}
           </button>
@@ -272,16 +375,26 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
             {sviGrid ? `Fitted ${fittedCount} of ${totalSlices} slices${fittedCount < totalSlices ? ' (sparse slices hidden)' : ''}` : 'SVI fit unavailable for this chain'}
           </span>
         )}
+        {hestonOn && (
+          <span className="dim" style={{ fontSize: 12 }}>
+            {hestonQuery.isLoading ? 'Calibrating Heston to the chain…'
+              : calib?.ok ? `Heston fit ${((calib.iv_rmse ?? 0) * 100).toFixed(1)} vol points across ${calib.n_instruments} options`
+              : 'Heston calibration unavailable'}
+          </span>
+        )}
       </div>
-      <Plot key={themeKey + (showSvi ? '-svi' : '')} data={traces} layout={layout} config={plotConfig}
+      <Plot key={themeKey + (showSvi ? '-svi' : '') + (showHeston ? '-heston' : '')} data={traces} layout={layout} config={plotConfig}
         style={{ width: '100%', height: 580 }} useResizeHandler />
       <div className="chart-note">
-        {showSvi
+        {showHeston
+          ? 'Heston stochastic-vol surface, one process fit to the whole chain, with the raw market IV points scattered on top. It spans the calibrated maturities out to roughly a year, so the tenor axis reaches further than the raw and SVI views.'
+          : showSvi
           ? 'SVI-fitted surface (continuous mesh) with the raw market IV points scattered on top. A point sitting off the mesh flags a data problem or a genuine dislocation; slices that fail to calibrate are hidden.'
-          : 'Raw IV across strike and expiration (near-money band), interpolated to a grid with contour lines. Toggle the SVI fit for a calibrated overlay. Drag to rotate, scroll to zoom.'}
+          : 'Raw IV across strike and expiration (near-money band), interpolated to a grid with contour lines. Toggle a fitted overlay above. Drag to rotate, scroll to zoom.'}
         {showArb ? ' Red × marks flag arbitrage violations on the raw surface (see report below).' : ''}
       </div>
     </div>
+    {hestonOn && <HestonPanel calib={calib} loading={hestonQuery.isLoading} />}
     {hasTerm && (
       <div className="chart-card" style={{ marginTop: 12 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>

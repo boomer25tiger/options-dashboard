@@ -58,17 +58,24 @@ export default function ContractPage() {
 
       {isLoading && <div className="msg"><span className="spin" />Pricing {selectedContract}…</div>}
       {isError && <div className="msg err">Failed to load: {(error as Error).message}</div>}
-      {data && tab === 'pricing' && <PricingTab d={data} dte={dte} />}
+      {data && tab === 'pricing' && <PricingTab d={data} dte={dte} ticker={ticker} symbol={selectedContract} />}
       {data && tab === 'probability' && <ProbabilityTab d={data} />}
     </div>
   )
 }
 
-function PricingTab({ d, dte }: { d: ContractDetail; dte: number | null }) {
+function PricingTab({ d, dte, ticker, symbol }: { d: ContractDetail; dte: number | null; ticker: string; symbol: string }) {
   const bs = d.pricing.black_scholes
   const binom = d.pricing.binomial_american
   const eep = d.pricing.early_exercise_premium
   const g = d.greeks
+
+  const heston = useQuery({
+    queryKey: ['contract-heston', ticker, symbol],
+    queryFn: () => api.contractHeston(ticker, symbol),
+    staleTime: 5 * 60 * 1000,
+  })
+  const h = heston.data
 
   return (
     <div>
@@ -82,6 +89,17 @@ function PricingTab({ d, dte }: { d: ContractDetail; dte: number | null }) {
           <div className="lbl">Binomial (American)</div>
           <div className="big">{money(binom)}</div>
           <div className="sub">CRR tree, 200 steps</div>
+        </div>
+        <div className="card">
+          <div className="lbl">Heston</div>
+          <div className="big">{heston.isLoading ? '…' : h?.price != null ? money(h.price) : '—'}</div>
+          <div className="sub">
+            {heston.isLoading ? 'calibrating surface…'
+              : !h?.ok ? 'calibration unavailable'
+              : h.price == null ? 'not priced at expiry'
+              : h.iv != null ? `stochastic vol · IV ${(h.iv * 100).toFixed(1)}%`
+              : 'stochastic vol'}
+          </div>
         </div>
         <div className={`card ${eep != null && eep > 0.005 ? 'hl' : ''}`}>
           <div className="lbl">Early-exercise premium</div>
@@ -98,6 +116,13 @@ function PricingTab({ d, dte }: { d: ContractDetail; dte: number | null }) {
       {d.read?.pricing && (
         <div className="verdict" style={{ marginBottom: 12 }}>
           <b>{d.read.pricing.headline}.</b> {d.read.pricing.detail}
+        </div>
+      )}
+
+      {h?.ok && h.read && (
+        <div className="verdict" style={{ marginBottom: 12 }}>
+          <b>{h.read.headline}.</b> {h.read.detail}
+          {h.iv_rmse != null && <span className="dim"> Surface fit RMSE {(h.iv_rmse * 100).toFixed(1)} vol points.</span>}
         </div>
       )}
 

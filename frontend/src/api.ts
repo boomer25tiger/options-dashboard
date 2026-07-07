@@ -86,6 +86,33 @@ export interface SurfaceResponse {
   term_structure: { points: TermPoint[]; read?: { headline: string; detail: string } | null }
 }
 
+export interface HestonParams { v0: number; kappa: number; theta: number; xi: number; rho: number }
+export interface HestonPerExp { expiration: string; tenor: number; n: number; iv_rmse: number }
+export interface HestonCalibration {
+  ok: boolean
+  reason?: string | null
+  params?: HestonParams
+  iv_rmse?: number | null
+  n_instruments?: number
+  feller_ok?: boolean
+  per_expiration?: HestonPerExp[]
+  spot?: number | null
+  as_of?: string | null
+  surface?: { strikes: number[]; tenors: number[]; z: (number | null)[][] } | null
+  points?: SurfacePoint[]
+}
+export interface ContractHeston {
+  ok: boolean
+  reason?: string | null
+  price: number | null
+  iv: number | null
+  market_iv: number | null
+  iv_rmse: number | null
+  feller_ok?: boolean
+  params?: HestonParams | null
+  read: { headline: string; detail: string } | null
+}
+
 export interface SmilePoint {
   strike: number; iv: number; type: 'call' | 'put'; in_the_money: boolean | null
 }
@@ -223,6 +250,9 @@ export const api = {
     get<SurfaceResponse>('analysis/surface', { ticker, iv_source: ivSource, max_expirations: maxExpirations }),
   smile: (ticker: string, expiration: string, ivSource: string) =>
     get<SmileResponse>('analysis/smile', { ticker, expiration, iv_source: ivSource }),
+  heston: (ticker: string) => get<HestonCalibration>('analysis/heston', { ticker }),
+  contractHeston: (ticker: string, symbol: string) =>
+    get<ContractHeston>('contract/heston', { ticker, symbol }),
   realizedVsImplied: (ticker: string) =>
     get<RealizedVsImplied>('analysis/realized-vs-implied', { ticker }),
   contract: (ticker: string, symbol: string, ivSource: string) =>
