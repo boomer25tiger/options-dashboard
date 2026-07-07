@@ -23,7 +23,7 @@ from pricing_engine import (  # noqa: E402
 from backend.data import alpaca, dividends, normalize, rates, yfinance_client
 from backend.data.alpaca import AlpacaError
 from backend.data.yfinance_client import YFinanceError
-from backend import analytics, strategy
+from backend import analytics, commentary, strategy
 from backend import surface as surface_mod
 from backend.storage import db
 
@@ -279,8 +279,17 @@ def realized_vs_implied(ticker):
     cone = analytics.vol_cone(bars)
     divergence = analytics.gk_cc_divergence(gk, cc, window=20)
 
-    exp_dates, exp_strs = nearest_expiration_dates(ticker, 1)
-    chain, _, _, _ = _load_chain(ticker, exp_strs, exp_dates, "auto", None,
+    # Match the implied tenor to the 20-day realized window so the premium
+    # compares like horizons. 20 trading days is roughly 28 calendar days, so take
+    # the expiration nearest one month out rather than the nearest overall, which
+    # can be 0DTE and prints a degenerate ATM IV.
+    target_days = 28
+    all_dates, all_strs = nearest_expiration_dates(ticker, 12)
+    today = dt.date.today()
+    idx = min(range(len(all_dates)),
+              key=lambda i: abs((all_dates[i] - today).days - target_days))
+    exp_date, exp_str = all_dates[idx], all_strs[idx]
+    chain, _, _, _ = _load_chain(ticker, [exp_str], [exp_date], "auto", None,
                                  strike_band=0.3)
     atm = analytics.atm_iv(chain)
 
@@ -291,9 +300,11 @@ def realized_vs_implied(ticker):
     if atm and gk20:
         vrp = {"spread": atm - gk20, "ratio": atm / gk20, "basis": "gk_20"}
 
+    read = commentary.realized_implied_read(atm, gk20, cone.get("20"), divergence)
+
     return {
         "ticker": ticker, "spot": chain.spot,
-        "atm_iv": atm, "atm_expiration": exp_dates[0].isoformat(),
+        "atm_iv": atm, "atm_expiration": exp_date.isoformat(),
         "realized_vol": {str(w): v for w, v in gk.items()},        # primary = GK
         "realized_vol_gk": {str(w): v for w, v in gk.items()},
         "realized_vol_cc": {str(w): v for w, v in cc.items()},
@@ -301,6 +312,7 @@ def realized_vs_implied(ticker):
         "vrp": vrp,
         "divergence": divergence,
         "cone": cone,
+        "read": read,
     }
 
 

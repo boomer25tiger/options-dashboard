@@ -117,6 +117,7 @@ export interface RealizedVsImplied {
     flag: boolean; gk_below_cc: boolean
   } | null
   cone: Record<string, ConeBand | null>
+  read: { lean: 'rich' | 'cheap' | 'neutral'; headline: string; detail: string; assumption: string } | null
 }
 
 export interface ExpirationsResponse { ticker: string; expirations: string[] }

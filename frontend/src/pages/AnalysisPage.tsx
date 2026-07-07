@@ -561,7 +561,15 @@ function RealizedTab({ ticker, themeKey }: { ticker: string; themeKey: string })
         </div>
       </div>
 
-      <div className="verdict" style={{ marginBottom: 12 }}>{verdict}</div>
+      <div className="verdict" style={{ marginBottom: 12 }}>
+        {data.read ? (
+          <>
+            <b className={data.read.lean === 'rich' ? 'rich' : data.read.lean === 'cheap' ? 'cheap' : ''}>{data.read.headline}.</b>{' '}
+            {data.read.detail}{' '}
+            <span className="dim">{data.read.assumption}</span>
+          </>
+        ) : verdict}
+      </div>
       {divergenceNote}
 
       <div className="chart-card" style={{ marginBottom: 14 }}>
