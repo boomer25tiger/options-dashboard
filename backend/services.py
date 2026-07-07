@@ -245,7 +245,7 @@ def contract_detail(ticker, symbol, iv_source="auto", dividend_override=None):
             pop = prob_profit_long_option(S, K, T, r, sigma, otype, premium, q)
             breakeven = breakeven_long_option(K, premium, otype)
 
-    return {
+    out = {
         "symbol": symbol, "type": otype, "strike": K,
         "expiration": exp.isoformat(), "spot": S,
         "time_to_expiry": T, "rate_used": r, "iv": sigma, "dividend_yield": q,
@@ -265,6 +265,8 @@ def contract_detail(ticker, symbol, iv_source="auto", dividend_override=None):
         },
         "as_of": meta["as_of"], "iv_source": iv_source,
     }
+    out["read"] = commentary.contract_read(out, ticker)
+    return out
 
 
 def realized_vs_implied(ticker):

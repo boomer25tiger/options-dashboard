@@ -171,3 +171,82 @@ def strategy_read(summary, spot, ticker="the underlying"):
         "detail": detail,
         "note": "Probability of profit is modeled under the current implied vol.",
     }
+
+
+def _pricing_read(pricing, otype, q):
+    """Early-exercise interpretation from the binomial-minus-Black-Scholes gap."""
+    bs = pricing.get("black_scholes")
+    eep = pricing.get("early_exercise_premium")
+    if bs is None or eep is None:
+        return None
+    if eep <= 0.005:
+        return {
+            "headline": "Early exercise adds nothing here",
+            "detail": ("The binomial American price matches Black-Scholes to within "
+                       "half a cent, so early exercise carries no value and the "
+                       "European formula is a fine approximation for this contract."),
+        }
+    pct_str = f", about {eep / bs * 100:.0f}% of its value" if bs and bs > 0 else ""
+    if otype == "put":
+        context = ("Puts earn this deep in the money, where exercising early frees "
+                   "the time value of money on the strike.")
+    elif otype == "call" and q > 0:
+        context = ("For a call it comes from dividends, where exercising early "
+                   "captures a payout the holder would otherwise miss.")
+    else:
+        context = "It measures the value of the right to exercise before expiry."
+    return {
+        "headline": "Early exercise carries value",
+        "detail": (f"The American binomial price sits ${eep:.2f} above "
+                   f"Black-Scholes{pct_str}, the premium for the right to exercise "
+                   f"before expiry. {context}"),
+    }
+
+
+def _probability_read(prob, spot, otype, ticker):
+    """Breakeven distance and modeled probabilities for a single option."""
+    be = prob.get("breakeven")
+    p_itm = prob.get("prob_itm")
+    pop = prob.get("prob_of_profit")
+    if be is None and p_itm is None and pop is None:
+        return None
+
+    headline = "Breakeven and probability"
+    s1 = ""
+    if be is not None and spot:
+        move_pct = abs(be - spot) / spot * 100.0
+        side = "above" if be >= spot else "below"
+        verb = "rise" if otype == "call" else "fall"
+        headline = f"Profits if {ticker} finishes {side} {be:.2f}"
+        s1 = (f"Breakeven {be:.2f} sits {move_pct:.1f}% {side} spot, so {ticker} must "
+              f"{verb} that far by expiry to profit. ")
+
+    if p_itm is not None and pop is not None:
+        s2 = (f"A {p_itm * 100:.0f}% modeled chance of finishing in the money, and "
+              f"{pop * 100:.0f}% of profit after the premium.")
+    elif p_itm is not None:
+        s2 = f"A {p_itm * 100:.0f}% modeled chance of finishing in the money."
+    elif pop is not None:
+        s2 = f"A {pop * 100:.0f}% modeled chance of profit after the premium."
+    else:
+        s2 = ""
+
+    return {"headline": headline, "detail": (s1 + s2).strip()}
+
+
+def contract_read(detail, ticker="the underlying"):
+    """
+    Reads for the Contract page, one per tab. `pricing` interprets the
+    early-exercise premium; `probability` interprets the breakeven distance and the
+    modeled odds. Either may be None when its inputs are missing.
+    """
+    if not detail:
+        return None
+    otype = detail.get("type")
+    pricing = _pricing_read(detail.get("pricing") or {}, otype,
+                            detail.get("dividend_yield") or 0.0)
+    probability = _probability_read(detail.get("probability") or {},
+                                    detail.get("spot"), otype, ticker)
+    if pricing is None and probability is None:
+        return None
+    return {"pricing": pricing, "probability": probability}

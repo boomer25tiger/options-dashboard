@@ -7,7 +7,7 @@ Run:  python3 check_commentary.py
 """
 import sys
 
-from backend.commentary import realized_implied_read, strategy_read
+from backend.commentary import contract_read, realized_implied_read, strategy_read
 
 _PASSES, _FAILS = [], []
 
@@ -140,6 +140,45 @@ check("summary without greeks returns None",
       strategy_read({"greeks": {}, "net_cost": 1}, 750.0) is None)
 check("strategy note states the probability assumption",
       bull["note"].startswith("Probability of profit is modeled"))
+
+
+hr("Contract read: early exercise and breakeven")
+
+# In-the-money put on a dividend payer, with a real early-exercise premium.
+PUT = {"type": "put", "spot": 750.0, "dividend_yield": 0.012,
+       "pricing": {"black_scholes": 12.00, "binomial_american": 12.40,
+                   "early_exercise_premium": 0.40},
+       "probability": {"prob_itm": 0.55, "prob_of_profit": 0.48, "breakeven": 735.0}}
+# Call on a no-dividend underlying, American equals European.
+CALL = {"type": "call", "spot": 750.0, "dividend_yield": 0.0,
+        "pricing": {"black_scholes": 9.00, "binomial_american": 9.001,
+                    "early_exercise_premium": 0.001},
+        "probability": {"prob_itm": 0.42, "prob_of_profit": 0.37, "breakeven": 759.0}}
+
+put = contract_read(PUT, "SPY")
+check("ITM put with a gap reads early exercise as valuable",
+      put["pricing"]["headline"] == "Early exercise carries value")
+check("early-exercise dollars keep cents precision",
+      "$0.40 above" in put["pricing"]["detail"], put["pricing"]["detail"])
+check("put early-exercise context mentions the strike's time value",
+      "time value of money on the strike" in put["pricing"]["detail"])
+check("put breakeven read points downward",
+      put["probability"]["headline"] == "Profits if SPY finishes below 735.00"
+      and "must fall" in put["probability"]["detail"], put["probability"]["detail"])
+check("put probability names ITM and profit odds",
+      "55% modeled chance" in put["probability"]["detail"]
+      and "48% of profit" in put["probability"]["detail"])
+
+call = contract_read(CALL, "SPY")
+check("no-dividend call shows no early-exercise value",
+      call["pricing"]["headline"] == "Early exercise adds nothing here")
+check("call breakeven read points upward",
+      call["probability"]["headline"] == "Profits if SPY finishes above 759.00"
+      and "must rise" in call["probability"]["detail"])
+
+check("missing detail returns None", contract_read(None) is None)
+check("detail without pricing or probability returns None",
+      contract_read({"type": "call", "pricing": {}, "probability": {}}) is None)
 
 
 hr("RESULT")

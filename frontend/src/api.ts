@@ -151,6 +151,10 @@ export interface ContractDetail {
   }
   as_of: string
   iv_source: string
+  read: {
+    pricing: { headline: string; detail: string } | null
+    probability: { headline: string; detail: string } | null
+  } | null
 }
 
 export interface StrategyLegInput {

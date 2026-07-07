@@ -95,6 +95,12 @@ function PricingTab({ d, dte }: { d: ContractDetail; dte: number | null }) {
         </div>
       </div>
 
+      {d.read?.pricing && (
+        <div className="verdict" style={{ marginBottom: 12 }}>
+          <b>{d.read.pricing.headline}.</b> {d.read.pricing.detail}
+        </div>
+      )}
+
       <div className="note">
         Black-Scholes prices a European option in closed form. The binomial tree prices the American
         option, which can be exercised early, so the difference is the early-exercise premium. It is
@@ -196,6 +202,12 @@ function ProbabilityTab({ d }: { d: ContractDetail }) {
           <div className="sub">{d.type === 'call' ? 'strike + premium' : 'strike − premium'}</div>
         </div>
       </div>
+
+      {d.read?.probability && (
+        <div className="verdict" style={{ marginBottom: 12 }}>
+          <b>{d.read.probability.headline}.</b> {d.read.probability.detail}
+        </div>
+      )}
 
       <div className="note">
         Probabilities use the option's own implied volatility under the lognormal (Black-Scholes)
