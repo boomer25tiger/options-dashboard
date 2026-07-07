@@ -83,7 +83,7 @@ export interface SurfaceResponse {
   expirations: string[]; points: SurfacePoint[]
   svi: { slices: SviSlice[] }
   arbitrage: { violations: ArbViolation[]; counts: { butterfly: number; calendar: number }; truncated: boolean }
-  term_structure: { points: TermPoint[] }
+  term_structure: { points: TermPoint[]; read?: { headline: string; detail: string } | null }
 }
 
 export interface SmilePoint {

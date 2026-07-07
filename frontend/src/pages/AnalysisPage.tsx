@@ -292,6 +292,11 @@ function SurfaceTab({ ticker, ivSource, themeKey }: { ticker: string; ivSource: 
         </div>
         <Plot key={themeKey + '-term' + (useSviLine ? '-svi' : '')} data={termData} layout={termLayout} config={plotConfig}
           style={{ width: '100%', height: 300 }} useResizeHandler />
+        {data.term_structure.read && (
+          <div className="verdict" style={{ marginTop: 8, marginBottom: 4 }}>
+            <b>{data.term_structure.read.headline}.</b> {data.term_structure.read.detail}
+          </div>
+        )}
         <div className="chart-note">
           ATM implied vol by maturity. An upward slope prices more uncertainty further out; an inverted, downward slope signals near-term stress.
           {sviOn && !hasSviAtm ? ' No slices calibrated, so this shows raw ATM.' : ''}

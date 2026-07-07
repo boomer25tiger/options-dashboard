@@ -333,6 +333,7 @@ def surface(ticker, max_expirations=8, iv_source="auto"):
     svi = surface_mod.svi_surface(chain, forwards)
     arb = surface_mod.arbitrage(chain, forwards, spot, rate_fn, q)
     term = surface_mod.atm_term_structure(chain, forwards, svi)
+    term["read"] = commentary.term_structure_read(term.get("points"))
     return {
         "ticker": ticker, "spot": spot, "as_of": meta["as_of"],
         "expirations": [d.isoformat() for d in chain.expirations],

@@ -7,7 +7,9 @@ Run:  python3 check_commentary.py
 """
 import sys
 
-from backend.commentary import contract_read, realized_implied_read, strategy_read
+from backend.commentary import (
+    contract_read, realized_implied_read, strategy_read, term_structure_read,
+)
 
 _PASSES, _FAILS = [], []
 
@@ -179,6 +181,33 @@ check("call breakeven read points upward",
 check("missing detail returns None", contract_read(None) is None)
 check("detail without pricing or probability returns None",
       contract_read({"type": "call", "pricing": {}, "probability": {}}) is None)
+
+
+hr("Term-structure read: slope of ATM implied by maturity")
+
+def _tp(tenor, iv):
+    return {"tenor": tenor, "atm_raw": iv}
+
+up = term_structure_read([_tp(0.02, 0.10), _tp(0.08, 0.12), _tp(0.25, 0.15)])
+check("rising ATM by maturity reads as upward-sloping",
+      up["headline"] == "Upward-sloping term structure", up["detail"])
+check("upward detail names both ends and the rise",
+      "10.0% at 7d" in up["detail"] and "15.0% at 91d" in up["detail"]
+      and "5.0-point rise" in up["detail"])
+
+inv = term_structure_read([_tp(0.02, 0.20), _tp(0.25, 0.14)])
+check("falling ATM by maturity reads as inverted",
+      inv["headline"] == "Inverted term structure" and "fall" in inv["detail"], inv["detail"])
+
+flat = term_structure_read([_tp(0.02, 0.120), _tp(0.25, 0.122)])
+check("near-equal ATM reads as flat", flat["headline"] == "Flat term structure")
+
+skip = term_structure_read([_tp(0.001, 0.04), _tp(0.05, 0.12), _tp(0.25, 0.15)])
+check("noisy 0DTE front is skipped for the front reference",
+      "12.0% at 18d" in skip["detail"] and "4.0%" not in skip["detail"], skip["detail"])
+
+check("single point returns None", term_structure_read([_tp(0.05, 0.12)]) is None)
+check("no points returns None", term_structure_read([]) is None)
 
 
 hr("RESULT")

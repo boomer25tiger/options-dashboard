@@ -250,3 +250,41 @@ def contract_read(detail, ticker="the underlying"):
     if pricing is None and probability is None:
         return None
     return {"pricing": pricing, "probability": probability}
+
+
+def term_structure_read(points):
+    """
+    Shape of the ATM term structure from the raw ATM points. Upward slope prices
+    more uncertainty further out; an inverted slope flags near-term stress. The
+    ultra-short front (0DTE and 1DTE) is skipped as the front reference where a
+    longer point exists, since near-zero-tenor ATM implied is noisy.
+    """
+    pts = sorted((p["tenor"], p["atm_raw"]) for p in (points or [])
+                 if p.get("atm_raw") is not None and p.get("tenor"))
+    if len(pts) < 2:
+        return None
+    front_candidates = [p for p in pts if p[0] >= 0.015]
+    front = front_candidates[0] if front_candidates else pts[0]
+    back = pts[-1]
+    if back[0] <= front[0]:
+        return None
+
+    diff = (back[1] - front[1]) * 100.0
+    fd, bd = round(front[0] * 365), round(back[0] * 365)
+    if diff > 0.5:
+        headline = "Upward-sloping term structure"
+        interp = ("The market prices more uncertainty further out, with no unusual "
+                  "near-term event in the front.")
+    elif diff < -0.5:
+        headline = "Inverted term structure"
+        interp = ("The front expiries carry the higher implied vol, a sign of "
+                  "near-term stress or an event priced into the short dates.")
+    else:
+        headline = "Flat term structure"
+        interp = "Implied vol is close across maturities, with no strong calendar tilt."
+
+    move = "rise" if diff >= 0 else "fall"
+    detail = (f"ATM implied runs {front[1] * 100:.1f}% at {fd}d and "
+              f"{back[1] * 100:.1f}% at {bd}d, a {abs(diff):.1f}-point {move} with "
+              f"maturity. {interp}")
+    return {"headline": headline, "detail": detail}
