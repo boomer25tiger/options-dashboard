@@ -125,12 +125,12 @@ function HedgingTab({ ticker, themeKey }: { ticker: string; themeKey: string }) 
   const x = data.steps.map((st) => st.date)
   const chartData = [
     { type: 'scatter', mode: 'lines', name: 'Hedge P&L', x, y: data.steps.map((st) => st.cum_pnl),
-      line: { color: c.accent, width: 2 }, hovertemplate: '%{x}<br>P&L $%{y:.0f}<extra></extra>' },
+      line: { color: c.accent, width: 2 }, hovertemplate: 'P&L $%{y:,.0f}<extra></extra>' },
     { type: 'scatter', mode: 'lines', name: 'Underlying', x, y: data.steps.map((st) => st.spot), yaxis: 'y2',
-      line: { color: c.muted, width: 1.5, dash: 'dot' }, hovertemplate: '%{x}<br>spot %{y:.2f}<extra></extra>' },
+      line: { color: c.muted, width: 1.5, dash: 'dot' }, hovertemplate: 'spot %{y:.2f}<extra></extra>' },
   ]
   const layout = {
-    ...baseLayout(), height: 380, showlegend: true,
+    ...baseLayout(), height: 380, showlegend: true, hovermode: 'x unified',
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12, yanchor: 'bottom', bgcolor: 'rgba(0,0,0,0)', font: { color: c.muted, size: 11 } },
     margin: { l: 62, r: 56, t: 34, b: 40 },
     xaxis: { ...baseLayout().xaxis },
