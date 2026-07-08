@@ -113,6 +113,27 @@ export interface ContractHeston {
   read: { headline: string; detail: string } | null
 }
 
+export interface MonteCarloConvergencePoint { n_paths: number; price: number; ci_low: number; ci_high: number }
+export interface ContractMonteCarlo {
+  ok: boolean
+  reason?: string | null
+  price: number | null
+  ci_low?: number; ci_high?: number; stderr?: number; n_paths?: number
+  bs?: number
+  convergence: MonteCarloConvergencePoint[]
+  read: { headline: string; detail: string } | null
+}
+export interface MonteCarloExotic {
+  ok: boolean
+  ticker: string; kind: string; option_type: string
+  spot: number; strike: number; implied_vol: number; days: number
+  price: number; ci_low: number; ci_high: number; stderr: number
+  knock_probability: number | null
+  average: string | null; barrier: number | null; barrier_type: string | null
+  vanilla_bs: number; vanilla_mc: number
+  read: { headline: string; detail: string } | null
+}
+
 export interface HedgeStep {
   i: number; date: string; spot: number; tau: number
   option_value: number; delta: number; hedge_shares: number
@@ -276,6 +297,14 @@ export const api = {
     }),
   contractHeston: (ticker: string, symbol: string) =>
     get<ContractHeston>('contract/heston', { ticker, symbol }),
+  contractMonteCarlo: (ticker: string, symbol: string) =>
+    get<ContractMonteCarlo>('contract/montecarlo', { ticker, symbol }),
+  montecarlo: (ticker: string, opts: { kind: string; optionType: string; days: number; moneyness: number; impliedVol?: number; average?: string; barrierMoneyness?: number; barrierType?: string }) =>
+    get<MonteCarloExotic>('analysis/montecarlo', {
+      ticker, kind: opts.kind, option_type: opts.optionType, days: opts.days,
+      moneyness: opts.moneyness, implied_vol: opts.impliedVol, average: opts.average,
+      barrier_moneyness: opts.barrierMoneyness, barrier_type: opts.barrierType,
+    }),
   realizedVsImplied: (ticker: string) =>
     get<RealizedVsImplied>('analysis/realized-vs-implied', { ticker }),
   contract: (ticker: string, symbol: string, ivSource: string) =>

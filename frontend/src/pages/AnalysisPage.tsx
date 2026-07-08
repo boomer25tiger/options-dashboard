@@ -6,7 +6,7 @@ import { api, type HestonCalibration } from '../api'
 import { pct, money } from '../format'
 import { baseLayout, plotColors, ivColorscale, cssVar, plotConfig } from '../plotTheme'
 
-type Tab = 'surface' | 'smile' | 'realized' | 'hedge'
+type Tab = 'surface' | 'smile' | 'realized' | 'hedge' | 'montecarlo'
 
 // Linear interpolation of a sorted [strike, iv] smile onto an arbitrary strike.
 // This is the only interpolation used and it is structural: a 3D surface needs a
@@ -56,11 +56,13 @@ export default function AnalysisPage() {
         <button className={tab === 'smile' ? 'active' : ''} onClick={() => setTab('smile')}>Volatility Smile</button>
         <button className={tab === 'realized' ? 'active' : ''} onClick={() => setTab('realized')}>Realized vs Implied</button>
         <button className={tab === 'hedge' ? 'active' : ''} onClick={() => setTab('hedge')}>Delta Hedging</button>
+        <button className={tab === 'montecarlo' ? 'active' : ''} onClick={() => setTab('montecarlo')}>Monte Carlo</button>
       </div>
       {tab === 'surface' && <SurfaceTab ticker={ticker} ivSource={ivSource} themeKey={theme} />}
       {tab === 'smile' && <SmileTab ticker={ticker} ivSource={ivSource} themeKey={theme} />}
       {tab === 'realized' && <RealizedTab ticker={ticker} themeKey={theme} />}
       {tab === 'hedge' && <HedgingTab ticker={ticker} themeKey={theme} />}
+      {tab === 'montecarlo' && <MonteCarloTab ticker={ticker} themeKey={theme} />}
     </div>
   )
 }
@@ -70,6 +72,117 @@ function Loading({ label }: { label: string }) {
 }
 function Failed({ error }: { error: unknown }) {
   return <div className="msg err">Failed to load: {(error as Error).message}</div>
+}
+
+function MonteCarloTab({ ticker, themeKey }: { ticker: string; themeKey: string }) {
+  const [kind, setKind] = useState<'asian' | 'barrier'>('asian')
+  const [optionType, setOptionType] = useState<'call' | 'put'>('call')
+  const [days, setDays] = useState(60)
+  const [moneyPct, setMoneyPct] = useState(100)
+  const [average, setAverage] = useState<'arithmetic' | 'geometric'>('arithmetic')
+  const [barrierType, setBarrierType] = useState('up-and-out')
+  const [barrierPct, setBarrierPct] = useState(110)
+  const c = plotColors()
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['mc-exotic', ticker, kind, optionType, days, moneyPct, average, barrierType, barrierPct],
+    queryFn: () => api.montecarlo(ticker, {
+      kind, optionType, days, moneyness: moneyPct / 100,
+      average: kind === 'asian' ? average : undefined,
+      barrierType: kind === 'barrier' ? barrierType : undefined,
+      barrierMoneyness: kind === 'barrier' ? barrierPct / 100 : undefined,
+    }),
+  })
+
+  const inputStyle = { padding: '5px 8px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 13, outline: 'none' }
+  const seg = <T,>(opts: { v: T; l: string }[], val: T, set: (v: T) => void) => (
+    <div style={{ display: 'flex', gap: 4 }}>
+      {opts.map((o) => <button key={String(o.v)} className={`btn ${val === o.v ? 'accent' : ''}`} onClick={() => set(o.v)}>{o.l}</button>)}
+    </div>
+  )
+  const controls = (
+    <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+      <div><div className="lbl" style={{ marginBottom: 4 }}>Type</div>{seg([{ v: 'asian' as const, l: 'Asian' }, { v: 'barrier' as const, l: 'Barrier' }], kind, setKind)}</div>
+      <div><div className="lbl" style={{ marginBottom: 4 }}>Option</div>{seg([{ v: 'call' as const, l: 'Call' }, { v: 'put' as const, l: 'Put' }], optionType, setOptionType)}</div>
+      <div><div className="lbl" style={{ marginBottom: 4 }}>Maturity</div>{seg([{ v: 30, l: '30d' }, { v: 60, l: '60d' }, { v: 90, l: '90d' }, { v: 180, l: '180d' }], days, setDays)}</div>
+      <div><div className="lbl" style={{ marginBottom: 4 }}>Strike %</div>{seg([{ v: 95, l: '95' }, { v: 100, l: '100' }, { v: 105, l: '105' }], moneyPct, setMoneyPct)}</div>
+      {kind === 'asian' && <div><div className="lbl" style={{ marginBottom: 4 }}>Average</div>{seg([{ v: 'arithmetic' as const, l: 'Arithmetic' }, { v: 'geometric' as const, l: 'Geometric' }], average, setAverage)}</div>}
+      {kind === 'barrier' && (
+        <>
+          <div>
+            <div className="lbl" style={{ marginBottom: 4 }}>Barrier</div>
+            <select value={barrierType} onChange={(e) => setBarrierType(e.target.value)} style={inputStyle}>
+              <option value="up-and-out">Up-and-out</option>
+              <option value="up-and-in">Up-and-in</option>
+              <option value="down-and-out">Down-and-out</option>
+              <option value="down-and-in">Down-and-in</option>
+            </select>
+          </div>
+          <div><div className="lbl" style={{ marginBottom: 4 }}>Barrier %</div><input value={barrierPct} onChange={(e) => setBarrierPct(Number(e.target.value) || 0)} style={{ ...inputStyle, width: 64 }} /></div>
+        </>
+      )}
+    </div>
+  )
+
+  if (isLoading) return <div>{controls}<Loading label={`Pricing the ${kind} for ${ticker}…`} /></div>
+  if (isError) return <div>{controls}<Failed error={error} /></div>
+  if (!data) return <div>{controls}</div>
+
+  const d = data
+  const barData = [
+    { type: 'bar', x: ['Exotic', 'Vanilla'], y: [d.price, d.vanilla_bs], width: [0.5, 0.5],
+      marker: { color: [c.accent, c.muted] },
+      error_y: { type: 'data', array: [(d.ci_high - d.ci_low) / 2, 0], visible: true, color: c.text, thickness: 1 },
+      hovertemplate: '%{x}: $%{y:.2f}<extra></extra>' },
+  ]
+  const barLayout = {
+    ...baseLayout(), height: 300, margin: { l: 58, r: 18, t: 18, b: 36 },
+    xaxis: { ...baseLayout().xaxis }, yaxis: { ...baseLayout().yaxis, title: { text: 'Price $' }, rangemode: 'tozero' },
+  }
+
+  return (
+    <div>
+      {controls}
+      <div className="cards">
+        <div className="card hl">
+          <div className="lbl">{kind === 'asian' ? `${d.average} Asian` : d.barrier_type} {d.option_type}</div>
+          <div className="big">{money(d.price)}</div>
+          <div className="sub">95% {money(d.ci_low)}–{money(d.ci_high)}</div>
+        </div>
+        <div className="card">
+          <div className="lbl">Vanilla · Black-Scholes</div>
+          <div className="big">{money(d.vanilla_bs)}</div>
+          <div className="sub">same strike &amp; maturity</div>
+        </div>
+        {kind === 'barrier' && d.knock_probability != null && (
+          <div className="card">
+            <div className="lbl">Knock probability</div>
+            <div className="big">{(d.knock_probability * 100).toFixed(1)}%</div>
+            <div className="sub">touches {money(d.barrier)}</div>
+          </div>
+        )}
+        <div className="card">
+          <div className="lbl">Strike · spot</div>
+          <div className="big">{money(d.strike)}</div>
+          <div className="sub">spot {money(d.spot)} · IV {(d.implied_vol * 100).toFixed(1)}%</div>
+        </div>
+      </div>
+
+      {d.read && (
+        <div className="verdict" style={{ marginBottom: 12 }}>
+          <b>{d.read.headline}.</b> {d.read.detail}
+        </div>
+      )}
+
+      <div className="chart-card">
+        <Plot key={themeKey + 'mcx'} data={barData} layout={barLayout} config={plotConfig}
+          style={{ width: '100%', height: 300 }} useResizeHandler />
+        <div className="chart-note">
+          Simulated price of the path-dependent option against the vanilla on the same strike and maturity, under the same lognormal model. The error bar is the Monte Carlo 95% interval on the exotic.
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function HedgingTab({ ticker, themeKey }: { ticker: string; themeKey: string }) {

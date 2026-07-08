@@ -77,6 +77,29 @@ function PricingTab({ d, dte, ticker, symbol }: { d: ContractDetail; dte: number
   })
   const h = heston.data
 
+  const mc = useQuery({
+    queryKey: ['contract-mc', ticker, symbol],
+    queryFn: () => api.contractMonteCarlo(ticker, symbol),
+    staleTime: 5 * 60 * 1000,
+  })
+  const m = mc.data
+  const cc = plotColors()
+  const conv = m?.convergence ?? []
+  const convData = [
+    { type: 'scatter', mode: 'lines', x: conv.map((p) => p.n_paths), y: conv.map((p) => p.ci_low), line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
+    { type: 'scatter', mode: 'lines', name: '95% interval', x: conv.map((p) => p.n_paths), y: conv.map((p) => p.ci_high), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(140,140,150,0.18)', hoverinfo: 'skip' },
+    { type: 'scatter', mode: 'lines+markers', name: 'Monte Carlo', x: conv.map((p) => p.n_paths), y: conv.map((p) => p.price), line: { color: cc.accent, width: 2 }, marker: { size: 6, color: cc.accent }, hovertemplate: '%{x} paths<br>$%{y:.3f}<extra></extra>' },
+  ]
+  const convLayout = {
+    ...baseLayout(), height: 260, showlegend: true,
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.14, yanchor: 'bottom', bgcolor: 'rgba(0,0,0,0)', font: { color: cc.muted, size: 11 } },
+    margin: { l: 58, r: 18, t: 30, b: 40 },
+    xaxis: { ...baseLayout().xaxis, title: { text: 'Paths' }, type: 'log' },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'Price $' } },
+    shapes: m?.bs != null ? [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: m.bs, y1: m.bs, line: { color: cc.text, dash: 'dash', width: 1.5 } }] : [],
+    annotations: m?.bs != null ? [{ xref: 'paper', x: 0.99, y: m.bs, text: `Black-Scholes ${money(m.bs)}`, showarrow: false, font: { color: cc.text, size: 10 }, yanchor: 'bottom', xanchor: 'right' }] : [],
+  }
+
   return (
     <div>
       <div className="cards">
@@ -101,6 +124,15 @@ function PricingTab({ d, dte, ticker, symbol }: { d: ContractDetail; dte: number
               : 'stochastic vol'}
           </div>
         </div>
+        <div className="card">
+          <div className="lbl">Monte Carlo</div>
+          <div className="big">{mc.isLoading ? '…' : m?.price != null ? money(m.price) : '—'}</div>
+          <div className="sub">
+            {mc.isLoading ? 'simulating…'
+              : m?.ok && m.ci_low != null && m.ci_high != null ? `95% ${money(m.ci_low)}–${money(m.ci_high)}`
+              : 'unavailable'}
+          </div>
+        </div>
         <div className={`card ${eep != null && eep > 0.005 ? 'hl' : ''}`}>
           <div className="lbl">Early-exercise premium</div>
           <div className="big">{money(eep)}</div>
@@ -123,6 +155,14 @@ function PricingTab({ d, dte, ticker, symbol }: { d: ContractDetail; dte: number
         <div className="verdict" style={{ marginBottom: 12 }}>
           <b>{h.read.headline}.</b> {h.read.detail}
           {h.iv_rmse != null && <span className="dim"> Surface fit RMSE {(h.iv_rmse * 100).toFixed(1)} vol points.</span>}
+        </div>
+      )}
+
+      {m?.ok && conv.length > 0 && (
+        <div className="chart-card" style={{ marginBottom: 12 }}>
+          <div className="lbl" style={{ marginBottom: 6 }}>Monte Carlo convergence</div>
+          <Plot data={convData} layout={convLayout} config={plotConfig} style={{ width: '100%', height: 260 }} useResizeHandler />
+          {m.read && <div className="chart-note"><b>{m.read.headline}.</b> {m.read.detail}</div>}
         </div>
       )}
 
