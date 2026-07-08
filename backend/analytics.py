@@ -7,6 +7,11 @@ implied vol, and point extraction for the volatility surface and smile.
 """
 import os
 import sys
+from datetime import date
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:
+    from backend.data.models import OptionChain
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -14,12 +19,13 @@ if _PROJECT_ROOT not in sys.path:
 from pricing_engine import realized_vol, garman_klass_vol  # noqa: E402
 
 
-def realized_vol_windows(closes, windows=(10, 20, 30, 60)):
+def realized_vol_windows(closes: Sequence[float],
+                         windows: Sequence[int] = (10, 20, 30, 60)) -> Dict[int, Optional[float]]:
     """Annualized realized vol for each lookback window."""
     return {w: realized_vol(closes, window=w) for w in windows}
 
 
-def realized_vol_series(closes, window=20):
+def realized_vol_series(closes: Sequence[float], window: int = 20) -> List[float]:
     """Rolling annualized realized vol, one value per day once enough history exists."""
     need = window + 1
     series = []
@@ -30,7 +36,8 @@ def realized_vol_series(closes, window=20):
     return series
 
 
-def realized_vol_rank(closes, window=20, lookback=252):
+def realized_vol_rank(closes: Sequence[float], window: int = 20,
+                      lookback: int = 252) -> Optional[Dict[str, Any]]:
     """
     Realized-vol rank proxy. 'rank' is the current value's position within the
     [min, max] band of the lookback window (IV-rank style, 0-100). 'percentile' is
@@ -52,20 +59,21 @@ def realized_vol_rank(closes, window=20, lookback=252):
     }
 
 
-def _ohlc(bars):
+def _ohlc(bars: List[Dict[str, Any]]) -> Tuple[List[float], List[float], List[float], List[float]]:
     return (
         [b["o"] for b in bars], [b["h"] for b in bars],
         [b["l"] for b in bars], [b["c"] for b in bars],
     )
 
 
-def garman_klass_windows(bars, windows=(10, 20, 30, 60)):
+def garman_klass_windows(bars: List[Dict[str, Any]],
+                         windows: Sequence[int] = (10, 20, 30, 60)) -> Dict[int, Optional[float]]:
     """Garman-Klass realized vol for each lookback window, from OHLC bars."""
     o, h, l, c = _ohlc(bars)
     return {w: garman_klass_vol(o, h, l, c, window=w) for w in windows}
 
 
-def garman_klass_series(bars, window=20):
+def garman_klass_series(bars: List[Dict[str, Any]], window: int = 20) -> List[float]:
     """Rolling Garman-Klass vol, one value per day once `window` sessions exist."""
     o, h, l, c = _ohlc(bars)
     series = []
@@ -77,14 +85,15 @@ def garman_klass_series(bars, window=20):
     return series
 
 
-def _percentile(sorted_vals, p):
+def _percentile(sorted_vals: Sequence[float], p: float) -> Optional[float]:
     if not sorted_vals:
         return None
     idx = int(round(p * (len(sorted_vals) - 1)))
     return sorted_vals[idx]
 
 
-def vol_cone(bars, windows=(10, 20, 30, 60), lookback=252):
+def vol_cone(bars: List[Dict[str, Any]], windows: Sequence[int] = (10, 20, 30, 60),
+             lookback: int = 252) -> Dict[str, Any]:
     """
     Realized-vol cone: the historical distribution (min / 25th / median / 75th /
     max) of Garman-Klass vol at each window over the lookback, with today's value.
@@ -105,7 +114,8 @@ def vol_cone(bars, windows=(10, 20, 30, 60), lookback=252):
     return cone
 
 
-def gk_cc_divergence(gk_windows, cc_windows, window=20, threshold=0.25):
+def gk_cc_divergence(gk_windows: Dict[int, Optional[float]], cc_windows: Dict[int, Optional[float]],
+                     window: int = 20, threshold: float = 0.25) -> Optional[Dict[str, Any]]:
     """
     Flag when Garman-Klass and close-to-close diverge substantially at `window`.
     A large gap signals significant intraday movement relative to closes, and warns
@@ -120,7 +130,7 @@ def gk_cc_divergence(gk_windows, cc_windows, window=20, threshold=0.25):
             "flag": rel > threshold, "gk_below_cc": gk < cc}
 
 
-def atm_iv(chain, expiration=None):
+def atm_iv(chain: "OptionChain", expiration: Optional[date] = None) -> Optional[float]:
     """IV of the contract nearest the money, optionally within one expiration."""
     if not chain.spot:
         return None
@@ -131,7 +141,7 @@ def atm_iv(chain, expiration=None):
     return min(cands, key=lambda c: abs(c.strike - chain.spot)).iv
 
 
-def surface_points(chain):
+def surface_points(chain: "OptionChain") -> List[Dict[str, Any]]:
     """
     One IV per (expiration, strike) for the 3D surface, preferring the out-of-the-
     money side (put below spot, call above), which carries the cleaner vol quote.
@@ -158,7 +168,7 @@ def surface_points(chain):
     return points
 
 
-def smile_points(chain, expiration):
+def smile_points(chain: "OptionChain", expiration: date) -> List[Dict[str, Any]]:
     """IV vs strike for one expiration (a 2D slice of the surface)."""
     points = [
         {"strike": c.strike, "iv": c.iv, "type": c.option_type,

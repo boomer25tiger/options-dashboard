@@ -1,10 +1,11 @@
 """
-Verification for the vectorized engine (engine_vec.py).
+Verification for the engine's vectorized (array) path.
 
-The scalar engine in pricing_engine.py is the reference. This prices a grid of
-contracts both ways and checks the vectorized results match element for element:
-price and Greeks to machine precision, implied vol to solver tolerance, and the
-NaN pattern of implied_vol_vec lined up with the scalar solver's None.
+The scalar path in pricing_engine.py is the reference. Passing NumPy arrays to the
+same bs_price / bs_greeks / implied_vol prices a whole grid in one call; this checks
+those array results match the scalar path element for element: price and Greeks to
+machine precision, implied vol to solver tolerance, and the NaN pattern of the array
+solver lined up with the scalar solver's None.
 
 Run:  python3 verify_engine_vec.py
 """
@@ -15,7 +16,6 @@ import sys
 import numpy as np
 
 from pricing_engine import bs_greeks, bs_price, implied_vol
-from engine_vec import bs_greeks_vec, bs_price_vec, implied_vol_vec
 
 _PASSES, _FAILS = [], []
 
@@ -43,29 +43,29 @@ OT = [x[3] for x in rows]
 print(f"grid of {len(rows)} contracts")
 
 
-hr("Price matches the scalar engine element for element")
-price_vec = bs_price_vec(SPOT, K, T, R, SIG, OT, Q)
+hr("Array price matches the scalar engine element for element")
+price_vec = bs_price(SPOT, K, T, R, SIG, OT, Q)
 price_scalar = np.array([bs_price(SPOT, k, t, R, s, o, Q) for k, t, s, o in rows])
 check("max |price_vec - price_scalar| < 1e-10",
       float(np.max(np.abs(price_vec - price_scalar))) < 1e-10,
       f"max diff {np.max(np.abs(price_vec - price_scalar)):.2e}")
 
 
-hr("Greeks match the scalar engine")
-gv = bs_greeks_vec(SPOT, K, T, R, SIG, OT, Q)
+hr("Array Greeks match the scalar engine")
+gv = bs_greeks(SPOT, K, T, R, SIG, OT, Q)
 for name in ("delta", "gamma", "vega", "theta", "rho"):
     scal = np.array([bs_greeks(SPOT, k, t, R, s, o, Q)[name] for k, t, s, o in rows])
     diff = float(np.max(np.abs(gv[name] - scal)))
     check(f"max |{name}_vec - {name}_scalar| < 1e-9", diff < 1e-9, f"max diff {diff:.2e}")
 
 
-hr("Implied vol matches, and round-trips the input vol")
-iv_vec = implied_vol_vec(price_vec, SPOT, K, T, R, OT, Q)
+hr("Array implied vol matches, and round-trips the input vol")
+iv_vec = implied_vol(price_vec, SPOT, K, T, R, OT, Q)
 iv_scalar = np.array([implied_vol(p, SPOT, k, t, R, o, Q)
                       for p, (k, t, s, o) in zip(price_vec, rows)], dtype=object)
 iv_scalar = np.array([np.nan if v is None else v for v in iv_scalar], dtype=float)
 finite = np.isfinite(iv_vec) & np.isfinite(iv_scalar)
-check("vectorized IV agrees with the scalar solver",
+check("array IV agrees with the scalar solver",
       float(np.max(np.abs(iv_vec[finite] - iv_scalar[finite]))) < 1e-4,
       f"max diff {np.max(np.abs(iv_vec[finite] - iv_scalar[finite])):.2e}")
 # Where vega is meaningful the shared bisection recovers the input vol tightly. A
@@ -80,18 +80,18 @@ check("solvable mask matches the scalar None pattern",
       bool(np.array_equal(np.isfinite(iv_vec), np.isfinite(iv_scalar))))
 
 
-hr("Edge cases line up with the scalar engine")
-# Expiry and zero vol.
+hr("Array edge cases line up with the scalar engine")
+# Length-1 arrays force the vectorized path; scalars alone would take the reference path.
 check("expired call price equals intrinsic",
-      abs(float(bs_price_vec(100.0, 90.0, 0.0, R, 0.2, "call", Q)) - 10.0) < 1e-12)
+      abs(bs_price(np.array([100.0]), 90.0, 0.0, R, 0.2, "call", Q).item() - 10.0) < 1e-12)
 check("zero-vol put matches the scalar engine",
-      abs(float(bs_price_vec(100.0, 110.0, 1.0, R, 0.0, "put", Q))
+      abs(bs_price(np.array([100.0]), 110.0, 1.0, R, 0.0, "put", Q).item()
           - bs_price(100.0, 110.0, 1.0, R, 0.0, "put", Q)) < 1e-12)
-gv_edge = bs_greeks_vec(100.0, 100.0, 0.0, R, 0.2, "call", Q)
+gv_edge = bs_greeks(np.array([100.0]), 100.0, 0.0, R, 0.2, "call", Q)
 check("Greeks are NaN at expiry, as in the scalar engine",
-      all(math.isnan(float(gv_edge[g])) for g in ("delta", "gamma", "vega", "theta", "rho")))
+      all(math.isnan(gv_edge[g].item()) for g in ("delta", "gamma", "vega", "theta", "rho")))
 check("price below intrinsic gives NaN implied vol",
-      math.isnan(float(implied_vol_vec(0.5, 100.0, 80.0, 1.0, R, "call", Q))))
+      math.isnan(implied_vol(np.array([0.5]), 100.0, 80.0, 1.0, R, "call", Q).item()))
 
 
 hr("RESULT")

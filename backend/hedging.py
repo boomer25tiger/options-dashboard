@@ -18,6 +18,7 @@ Pure Python over pricing_engine, no third-party deps.
 import math
 import os
 import sys
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -25,7 +26,7 @@ if _PROJECT_ROOT not in sys.path:
 from pricing_engine import bs_greeks, bs_price  # noqa: E402
 
 
-def realized_vol(closes, steps_per_year=252):
+def realized_vol(closes: Sequence[float], steps_per_year: int = 252) -> Optional[float]:
     """Close-to-close annualised realized vol of the path."""
     rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))
             if closes[i] > 0 and closes[i - 1] > 0]
@@ -36,14 +37,16 @@ def realized_vol(closes, steps_per_year=252):
     return math.sqrt(var * steps_per_year)
 
 
-def _expiry_delta(spot, strike, option_type):
+def _expiry_delta(spot: float, strike: float, option_type: str) -> float:
     if option_type == "call":
         return 1.0 if spot > strike else 0.0
     return -1.0 if spot < strike else 0.0
 
 
-def simulate(closes, sigma_imp, r, q=0.0, option_type="call", position=1,
-             moneyness=1.0, quantity=1, steps_per_year=252, multiplier=100):
+def simulate(closes: Sequence[float], sigma_imp: float, r: float, q: float = 0.0,
+             option_type: str = "call", position: int = 1,
+             moneyness: float = 1.0, quantity: int = 1, steps_per_year: int = 252,
+             multiplier: int = 100) -> Optional[Dict[str, Any]]:
     """
     Simulate delta-hedging one option over the price path `closes`.
 
@@ -65,7 +68,7 @@ def simulate(closes, sigma_imp, r, q=0.0, option_type="call", position=1,
     dt = 1.0 / steps_per_year
     strike = closes[0] * moneyness
 
-    def price_and_greeks(spot, tau):
+    def price_and_greeks(spot: float, tau: float) -> Tuple[float, float, float, float]:
         if tau <= 0:
             intrinsic = max(0.0, (spot - strike) if otype == "call" else (strike - spot))
             return intrinsic, _expiry_delta(spot, strike, otype), 0.0, 0.0

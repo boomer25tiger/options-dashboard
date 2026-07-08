@@ -11,6 +11,11 @@ import math
 import os
 import sys
 import time
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:
+    from backend.data.models import Greeks, OptionChain, OptionContract
+    from backend.strategy import Leg
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -41,7 +46,7 @@ class NotFound(RuntimeError):
     """Raised when a specific contract cannot be located."""
 
 
-def _cached(key, ttl, producer):
+def _cached(key: Any, ttl: float, producer: Callable[[], Any]) -> Any:
     now = time.time()
     hit = _CACHE.get(key)
     if hit and now - hit[0] < ttl:
@@ -51,18 +56,15 @@ def _cached(key, ttl, producer):
     return value
 
 
-# ----------------------------------------------------------------------
-# Greek / contract serialization (display units)
-# ----------------------------------------------------------------------
 GREEKS_UNITS = {
     "delta": "per $1 spot", "gamma": "per $1 spot",
     "vega": "per 1% vol", "theta": "per calendar day", "rho": "per 1% rate",
 }
 
 
-def greeks_display(g):
+def greeks_display(g: "Greeks") -> Dict[str, Optional[float]]:
     """Convert engine-native Greeks to display units (vega/100, theta/365, rho/100)."""
-    def scaled(v, factor):
+    def scaled(v: Optional[float], factor: float) -> Optional[float]:
         return None if v is None else v / factor
     return {
         "delta": g.delta, "gamma": g.gamma,
@@ -72,7 +74,7 @@ def greeks_display(g):
     }
 
 
-def serialize_contract(c):
+def serialize_contract(c: "OptionContract") -> Dict[str, Any]:
     return {
         "symbol": c.symbol, "type": c.option_type, "strike": c.strike,
         "expiration": c.expiration.isoformat(),
@@ -85,10 +87,7 @@ def serialize_contract(c):
     }
 
 
-# ----------------------------------------------------------------------
-# Shared loaders
-# ----------------------------------------------------------------------
-def nearest_expiration_dates(ticker, n):
+def nearest_expiration_dates(ticker: str, n: int) -> Tuple[List[dt.date], List[str]]:
     exp_strs = yfinance_client.get_expirations(ticker)
     if not exp_strs:
         raise DataUnavailable(f"no expirations available for {ticker}")
@@ -96,12 +95,16 @@ def nearest_expiration_dates(ticker, n):
     return [dt.date.fromisoformat(e) for e in exp_strs], exp_strs
 
 
-def _load_chain(ticker, exp_strs, exp_dates, iv_source, dividend_override,
-                strike_band=0.3):
+def _load_chain(ticker: str, exp_strs: List[str], exp_dates: List[dt.date],
+                iv_source: str, dividend_override: Optional[float],
+                strike_band: float = 0.3
+                ) -> Tuple["OptionChain", Dict[str, Any],
+                           Callable[[float], Optional[float]], dt.datetime]:
     key = ("chain", ticker, tuple(exp_strs), iv_source, dividend_override,
            strike_band)
 
-    def produce():
+    def produce() -> Tuple["OptionChain", Dict[str, Any],
+                           Callable[[float], Optional[float]], dt.datetime]:
         now = dt.datetime.now(dt.timezone.utc)
         today = now.date()
         spot = yfinance_client.get_spot(ticker)
@@ -147,25 +150,22 @@ def _load_chain(ticker, exp_strs, exp_dates, iv_source, dividend_override,
     return _cached(key, _CHAIN_TTL, produce)
 
 
-def _load_bars(ticker, days=560):
+def _load_bars(ticker: str, days: int = 560) -> List[Dict[str, Any]]:
     """Daily OHLC bars, enough history for a 60-day vol cone over a year."""
     key = ("bars", ticker, days)
 
-    def produce():
+    def produce() -> List[Dict[str, Any]]:
         today = dt.date.today()
         return alpaca.get_stock_bars(ticker, start=today - dt.timedelta(days=days))
 
     return _cached(key, _BARS_TTL, produce)
 
 
-def _load_closes(ticker):
+def _load_closes(ticker: str) -> List[float]:
     return [b["c"] for b in _load_bars(ticker)]
 
 
-# ----------------------------------------------------------------------
-# Endpoints
-# ----------------------------------------------------------------------
-def market_status():
+def market_status() -> Dict[str, Any]:
     try:
         clock = alpaca.get_clock()
         return {
@@ -179,7 +179,7 @@ def market_status():
         return {"is_open": None, "source": "unavailable"}
 
 
-def assumptions(ticker, dividend_override=None):
+def assumptions(ticker: str, dividend_override: Optional[float] = None) -> Dict[str, Any]:
     rate_fn, rate_source, rate_points, rate_asof = rates.get_rate_curve()
     q, q_source = dividends.resolve_dividend_yield(ticker, dividend_override)
     sample = {t: rate_fn(t) for t in (0.25, 1.0, 2.0, 5.0)}
@@ -192,12 +192,13 @@ def assumptions(ticker, dividend_override=None):
     }
 
 
-def expirations(ticker):
+def expirations(ticker: str) -> Dict[str, Any]:
     exp_dates, exp_strs = nearest_expiration_dates(ticker, 60)
     return {"ticker": ticker, "expirations": exp_strs}
 
 
-def chain_page(ticker, num_expirations=6, iv_source="auto", dividend_override=None):
+def chain_page(ticker: str, num_expirations: int = 6, iv_source: str = "auto",
+               dividend_override: Optional[float] = None) -> Dict[str, Any]:
     exp_dates, exp_strs = nearest_expiration_dates(ticker, num_expirations)
     chain, meta, _, _ = _load_chain(ticker, exp_strs, exp_dates, iv_source,
                                     dividend_override)
@@ -216,7 +217,8 @@ def chain_page(ticker, num_expirations=6, iv_source="auto", dividend_override=No
     }
 
 
-def contract_detail(ticker, symbol, iv_source="auto", dividend_override=None):
+def contract_detail(ticker: str, symbol: str, iv_source: str = "auto",
+                    dividend_override: Optional[float] = None) -> Dict[str, Any]:
     underlying, exp, otype, strike = alpaca.parse_occ_symbol(symbol)
     chain, meta, _, _ = _load_chain(ticker, [exp.isoformat()], [exp], iv_source,
                                     dividend_override, strike_band=0.5)
@@ -270,7 +272,7 @@ def contract_detail(ticker, symbol, iv_source="auto", dividend_override=None):
     return out
 
 
-def realized_vs_implied(ticker):
+def realized_vs_implied(ticker: str) -> Dict[str, Any]:
     bars = _load_bars(ticker)
     closes = [b["c"] for b in bars]
     if len(closes) < 20:
@@ -319,7 +321,7 @@ def realized_vs_implied(ticker):
     }
 
 
-def realized_history(ticker, horizon=21):
+def realized_history(ticker: str, horizon: int = 21) -> Dict[str, Any]:
     """
     Two views of implied against realized over time.
 
@@ -378,7 +380,7 @@ def realized_history(ticker, horizon=21):
     }
 
 
-def _atm_iv_1m(ticker):
+def _atm_iv_1m(ticker: str) -> Optional[float]:
     """ATM implied vol of the expiration nearest one month out, or None."""
     all_dates, all_strs = nearest_expiration_dates(ticker, 12)
     today = dt.date.today()
@@ -389,8 +391,9 @@ def _atm_iv_1m(ticker):
     return analytics.atm_iv(chain)
 
 
-def hedge_simulation(ticker, lookback=30, implied_vol=None, option_type="call",
-                     position=1, moneyness=1.0):
+def hedge_simulation(ticker: str, lookback: int = 30, implied_vol: Optional[float] = None,
+                     option_type: str = "call", position: int = 1,
+                     moneyness: float = 1.0) -> Dict[str, Any]:
     """Delta-hedge one option over the last `lookback` trading days of the path."""
     bars = _load_bars(ticker)
     if len(bars) < lookback + 2:
@@ -422,7 +425,7 @@ def hedge_simulation(ticker, lookback=30, implied_vol=None, option_type="call",
     return result
 
 
-def surface(ticker, max_expirations=8, iv_source="auto"):
+def surface(ticker: str, max_expirations: int = 8, iv_source: str = "auto") -> Dict[str, Any]:
     exp_dates, exp_strs = nearest_expiration_dates(ticker, max_expirations)
     chain, meta, rate_fn, now = _load_chain(ticker, exp_strs, exp_dates, iv_source,
                                             None, strike_band=0.5)
@@ -449,7 +452,9 @@ def surface(ticker, max_expirations=8, iv_source="auto"):
 _HESTON_TTL = 300  # calibration is expensive and the chain is slow-moving
 
 
-def _heston_surface_grid(params, spot, rate_fn, q, tenor_lo, tenor_hi):
+def _heston_surface_grid(params: Dict[str, float], spot: float,
+                         rate_fn: Callable[[float], Optional[float]], q: float,
+                         tenor_lo: float, tenor_hi: float) -> Dict[str, Any]:
     """Heston-implied vol mesh over a near-money band and the calibrated tenor span."""
     v0, kappa, theta, xi, rho = (params[k] for k in ("v0", "kappa", "theta", "xi", "rho"))
     strikes = [spot * 0.8 + spot * 0.4 * i / 39 for i in range(40)]
@@ -467,9 +472,9 @@ def _heston_surface_grid(params, spot, rate_fn, q, tenor_lo, tenor_hi):
             "tenors": [round(t, 4) for t in tenors], "z": z}
 
 
-def heston_calibration(ticker):
+def heston_calibration(ticker: str) -> Dict[str, Any]:
     """Calibrate Heston to a maturity-diverse slice of the chain. Cached per ticker."""
-    def produce():
+    def produce() -> Dict[str, Any]:
         all_dates, _ = nearest_expiration_dates(ticker, 60)
         chosen = heston_calib.select_expirations(all_dates, dt.date.today())
         if len(chosen) < 3:
@@ -495,7 +500,7 @@ def heston_calibration(ticker):
     return _cached(("heston", ticker), _HESTON_TTL, produce)
 
 
-def contract_heston(ticker, symbol):
+def contract_heston(ticker: str, symbol: str) -> Dict[str, Any]:
     """Heston price for one contract from the cached whole-chain calibration."""
     _, exp, otype, strike = alpaca.parse_occ_symbol(symbol)
     chain, meta, _, _ = _load_chain(ticker, [exp.isoformat()], [exp], "auto", None,
@@ -530,7 +535,7 @@ def contract_heston(ticker, symbol):
     }
 
 
-def contract_montecarlo(ticker, symbol):
+def contract_montecarlo(ticker: str, symbol: str) -> Dict[str, Any]:
     """Monte Carlo vanilla price plus a convergence series for one contract."""
     _, exp, otype, strike = alpaca.parse_occ_symbol(symbol)
     chain, meta, _, _ = _load_chain(ticker, [exp.isoformat()], [exp], "auto", None,
@@ -558,9 +563,11 @@ def contract_montecarlo(ticker, symbol):
     }
 
 
-def montecarlo_exotic(ticker, kind="asian", option_type="call", days=60, moneyness=1.0,
-                      implied_vol=None, average="arithmetic", barrier_moneyness=1.1,
-                      barrier_type="up-and-out"):
+def montecarlo_exotic(ticker: str, kind: str = "asian", option_type: str = "call",
+                      days: int = 60, moneyness: float = 1.0,
+                      implied_vol: Optional[float] = None, average: str = "arithmetic",
+                      barrier_moneyness: float = 1.1,
+                      barrier_type: str = "up-and-out") -> Dict[str, Any]:
     """Price a path-dependent option on the underlying, with the vanilla for contrast."""
     spot = yfinance_client.get_spot(ticker)
     if not spot:
@@ -607,7 +614,7 @@ def montecarlo_exotic(ticker, kind="asian", option_type="call", days=60, moneyne
     }
 
 
-def _skew_metrics(chain, exp, forward):
+def _skew_metrics(chain: "OptionChain", exp: dt.date, forward: float) -> Dict[str, Any]:
     """
     ATM IV (at the forward), the 25-delta risk reversal (call IV minus put IV) and
     the 25-delta butterfly (wing average above ATM). Uses the per-strike reconciled
@@ -637,14 +644,14 @@ def _skew_metrics(chain, exp, forward):
     rr = (c25.iv - p25.iv) if (c25 and p25) else None
     bf = ((c25.iv + p25.iv) / 2 - atm_iv) if (c25 and p25 and atm_iv) else None
 
-    def leg(c):
+    def leg(c: Optional["OptionContract"]) -> Optional[Dict[str, Any]]:
         return {"strike": c.strike, "iv": c.iv, "delta": c.greeks.delta} if c else None
 
     return {"atm_iv": atm_iv, "rr_25": rr, "bf_25": bf,
             "call_25": leg(c25), "put_25": leg(p25)}
 
 
-def smile(ticker, expiration_str, iv_source="auto"):
+def smile(ticker: str, expiration_str: str, iv_source: str = "auto") -> Dict[str, Any]:
     exp = dt.date.fromisoformat(expiration_str)
     chain, meta, rate_fn, now = _load_chain(ticker, [expiration_str], [exp],
                                             iv_source, None, strike_band=0.5)
@@ -665,10 +672,8 @@ def smile(ticker, expiration_str, iv_source="auto"):
     }
 
 
-# ----------------------------------------------------------------------
-# Strategy
-# ----------------------------------------------------------------------
-def _fill_leg_sigmas(legs, ticker, iv_source, dividend_override):
+def _fill_leg_sigmas(legs: List["Leg"], ticker: str, iv_source: str,
+                     dividend_override: Optional[float]) -> None:
     """Populate any option leg missing sigma from the live chain at its expiration."""
     need = {leg.expiration for leg in legs
             if leg.is_option() and leg.sigma is None and leg.expiration}
@@ -692,7 +697,7 @@ def _fill_leg_sigmas(legs, ticker, iv_source, dividend_override):
                                     leg.expiration))
 
 
-def _valuation_dates(now, final_exp):
+def _valuation_dates(now: dt.datetime, final_exp: dt.date) -> List[Tuple[str, dt.datetime]]:
     """now, two dates on the way to expiry, and the expiration itself."""
     expiry_dt = dt.datetime(final_exp.year, final_exp.month, final_exp.day,
                             20, 0, 0, tzinfo=dt.timezone.utc)
@@ -706,7 +711,8 @@ def _valuation_dates(now, final_exp):
     return dates
 
 
-def price_strategy(ticker, legs, iv_source="auto", dividend_override=None):
+def price_strategy(ticker: str, legs: List["Leg"], iv_source: str = "auto",
+                   dividend_override: Optional[float] = None) -> Dict[str, Any]:
     now = dt.datetime.now(dt.timezone.utc)
     spot = yfinance_client.get_spot(ticker)
     if not spot:
@@ -761,10 +767,7 @@ def price_strategy(ticker, legs, iv_source="auto", dividend_override=None):
     }
 
 
-# ----------------------------------------------------------------------
-# History (SQLite-backed)
-# ----------------------------------------------------------------------
-def record_visit(ticker, iv_source="auto"):
+def record_visit(ticker: str, iv_source: str = "auto") -> Dict[str, Any]:
     """
     Compute the key metrics for a ticker and store one visit row. The frontend
     calls this when the user actively examines a ticker; recording is explicit so
@@ -788,13 +791,13 @@ def record_visit(ticker, iv_source="auto"):
     return db.record_visit(ticker, metrics, now.isoformat())
 
 
-def history_visits(ticker=None, limit=200):
+def history_visits(ticker: Optional[str] = None, limit: int = 200) -> Dict[str, Any]:
     return {"visits": db.list_visits(ticker, limit)}
 
 
-def history_tickers():
+def history_tickers() -> Dict[str, Any]:
     return {"tickers": db.distinct_tickers()}
 
 
-def history_series(tickers, metric):
+def history_series(tickers: Sequence[str], metric: str) -> Dict[str, Any]:
     return {"metric": metric, "series": db.metric_series(tickers, metric)}

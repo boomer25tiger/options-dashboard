@@ -4,18 +4,19 @@ short directional interpretation. Each read is a pure function of values shown o
 the page, tied to specific numbers, with the assumption stated and no explicit buy
 or sell. Thresholds live as module constants so they are easy to tune and test.
 """
+from typing import Any, Dict, List, Optional
 
 # Volatility-risk-premium bands, expressed as the implied/realized ratio.
 _RICH_RATIO = 1.15   # implied at least 15% above realized -> options screen rich
 _CHEAP_RATIO = 0.90  # implied at least 10% below realized -> options screen cheap
 
 
-def _pts(x):
+def _pts(x: float) -> float:
     """Vol points from a decimal vol (0.151 -> 15.1)."""
     return x * 100.0
 
 
-def _cone_bucket(current, cone20):
+def _cone_bucket(current: float, cone20: Optional[Dict[str, Any]]) -> Optional[str]:
     """Where current realized sits within its own one-year distribution."""
     if not cone20:
         return None
@@ -28,7 +29,9 @@ def _cone_bucket(current, cone20):
     return "high"
 
 
-def realized_implied_read(atm_iv, realized_gk20, cone20=None, divergence=None):
+def realized_implied_read(atm_iv: Optional[float], realized_gk20: Optional[float],
+                          cone20: Optional[Dict[str, Any]] = None,
+                          divergence: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Directional read for the Realized vs Implied page. Compares ATM implied with
     20-day Garman-Klass realized (the volatility risk premium), qualifies the lean
@@ -81,7 +84,7 @@ def realized_implied_read(atm_iv, realized_gk20, cone20=None, divergence=None):
     }
 
 
-def _money(x):
+def _money(x: float) -> str:
     return f"${abs(x):,.0f}"
 
 
@@ -90,7 +93,8 @@ def _money(x):
 _SENS_FLOOR = 1.0
 
 
-def strategy_read(summary, spot, ticker="the underlying"):
+def strategy_read(summary: Optional[Dict[str, Any]], spot: Optional[float],
+                  ticker: str = "the underlying") -> Optional[Dict[str, Any]]:
     """
     Directional read for the Strategy builder. Names the risk character (defined
     or open-ended), the dominant exposure (directional vs volatility, decided by
@@ -173,7 +177,7 @@ def strategy_read(summary, spot, ticker="the underlying"):
     }
 
 
-def _pricing_read(pricing, otype, q):
+def _pricing_read(pricing: Dict[str, Any], otype: Optional[str], q: float) -> Optional[Dict[str, Any]]:
     """Early-exercise interpretation from the binomial-minus-Black-Scholes gap."""
     bs = pricing.get("black_scholes")
     eep = pricing.get("early_exercise_premium")
@@ -203,7 +207,8 @@ def _pricing_read(pricing, otype, q):
     }
 
 
-def _probability_read(prob, spot, otype, ticker):
+def _probability_read(prob: Dict[str, Any], spot: Optional[float],
+                      otype: Optional[str], ticker: str) -> Optional[Dict[str, Any]]:
     """Breakeven distance and modeled probabilities for a single option."""
     be = prob.get("breakeven")
     p_itm = prob.get("prob_itm")
@@ -234,7 +239,7 @@ def _probability_read(prob, spot, otype, ticker):
     return {"headline": headline, "detail": (s1 + s2).strip()}
 
 
-def contract_read(detail, ticker="the underlying"):
+def contract_read(detail: Optional[Dict[str, Any]], ticker: str = "the underlying") -> Optional[Dict[str, Any]]:
     """
     Reads for the Contract page, one per tab. `pricing` interprets the
     early-exercise premium; `probability` interprets the breakeven distance and the
@@ -252,7 +257,7 @@ def contract_read(detail, ticker="the underlying"):
     return {"pricing": pricing, "probability": probability}
 
 
-def term_structure_read(points):
+def term_structure_read(points: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
     """
     Shape of the ATM term structure from the raw ATM points. Upward slope prices
     more uncertainty further out; an inverted slope flags near-term stress. The
@@ -290,7 +295,9 @@ def term_structure_read(points):
     return {"headline": headline, "detail": detail}
 
 
-def heston_contract_read(price, heston_iv, market_iv, fit_iv_rmse):
+def heston_contract_read(price: Optional[float], heston_iv: Optional[float],
+                         market_iv: Optional[float],
+                         fit_iv_rmse: Optional[float]) -> Optional[Dict[str, Any]]:
     """
     Where a single contract sits against the whole-chain Heston fit. Compares the
     Heston-implied vol with the contract's own market implied vol, and only calls it
@@ -323,7 +330,7 @@ def heston_contract_read(price, heston_iv, market_iv, fit_iv_rmse):
     }
 
 
-def hedge_read(summary):
+def hedge_read(summary: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     Reads a delta-hedging run in terms of the vol spread that drove it. A long
     delta hedge is paid when the path moves more than the implied vol it hedged at;
@@ -369,7 +376,8 @@ def hedge_read(summary):
     }
 
 
-def montecarlo_read(price, ci_low, ci_high, bs):
+def montecarlo_read(price: Optional[float], ci_low: float, ci_high: float,
+                    bs: Optional[float]) -> Optional[Dict[str, Any]]:
     """Whether the Monte Carlo interval agrees with the closed-form price."""
     if price is None or bs is None:
         return None
@@ -389,8 +397,10 @@ def montecarlo_read(price, ci_low, ci_high, bs):
     }
 
 
-def exotic_read(kind, option_type, price, vanilla, knock_probability=None,
-                average=None, barrier_type=None):
+def exotic_read(kind: str, option_type: str, price: Optional[float],
+                vanilla: Optional[float], knock_probability: Optional[float] = None,
+                average: Optional[str] = None,
+                barrier_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Reads a path-dependent price against the vanilla on the same strike."""
     if price is None or vanilla is None:
         return None
@@ -414,7 +424,9 @@ def exotic_read(kind, option_type, price, vanilla, knock_probability=None,
     return {"headline": headline, "detail": detail}
 
 
-def realized_history_read(current_implied, fwd_median, above_share, premium, horizon):
+def realized_history_read(current_implied: Optional[float], fwd_median: Optional[float],
+                          above_share: Optional[float], premium: Optional[float],
+                          horizon: int) -> Optional[Dict[str, Any]]:
     """
     Empirical vol-risk premium: how the current implied compares with the realized
     vol that actually followed over the past year, and how often it sat above it.

@@ -12,6 +12,7 @@ The IV-source policy:
 import datetime as dt
 import os
 import sys
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # The pricing engine lives at the project root as the single source of truth.
 _PROJECT_ROOT = os.path.dirname(
@@ -39,7 +40,7 @@ _IV_MAX_PLAUSIBLE = 1.5
 _IV_MIN_TRUST = 0.02
 
 
-def _time_to_expiry(expiration, now):
+def _time_to_expiry(expiration: dt.date, now: dt.datetime) -> float:
     expiry_dt = dt.datetime(
         expiration.year, expiration.month, expiration.day,
         _EXPIRY_HOUR_UTC, 0, 0, tzinfo=dt.timezone.utc,
@@ -48,22 +49,22 @@ def _time_to_expiry(expiration, now):
     return max(seconds, 0.0) / (_DAYS_PER_YEAR * 24 * 3600)
 
 
-def time_to_expiry(expiration, now):
+def time_to_expiry(expiration: dt.date, now: dt.datetime) -> float:
     """Public wrapper for the shared time-to-expiry convention (years, expiry ~16:00 ET)."""
     return _time_to_expiry(expiration, now)
 
 
-def _mid(bid, ask):
+def _mid(bid: Optional[float], ask: Optional[float]) -> Optional[float]:
     if bid is not None and ask is not None and bid > 0 and ask > 0:
         return 0.5 * (bid + ask)
     return None
 
 
-def _key(option_type, strike, expiration):
+def _key(option_type: str, strike: float, expiration: dt.date) -> Tuple[str, float, dt.date]:
     return (option_type, round(float(strike), 3), expiration)
 
 
-def _num(value):
+def _num(value: Any) -> Optional[float]:
     """Coerce to float, treating NaN and None as missing."""
     if value is None:
         return None
@@ -71,15 +72,12 @@ def _num(value):
         f = float(value)
     except (TypeError, ValueError):
         return None
-    if f != f:  # NaN
+    if f != f:
         return None
     return f
 
 
-# ----------------------------------------------------------------------
-# Source adapters -> partially filled OptionContract (no Greeks / T yet)
-# ----------------------------------------------------------------------
-def contract_from_alpaca(symbol, snap):
+def contract_from_alpaca(symbol: str, snap: Dict[str, Any]) -> OptionContract:
     underlying, expiration, option_type, strike = parse_occ_symbol(symbol)
     quote = snap.get("latestQuote") or {}
     trade = snap.get("latestTrade") or {}
@@ -104,7 +102,7 @@ def contract_from_alpaca(symbol, snap):
     )
 
 
-def contract_from_yfinance(row, expiration, underlying):
+def contract_from_yfinance(row: Dict[str, Any], expiration: dt.date, underlying: str) -> OptionContract:
     strike = _num(row.get("strike"))
     symbol = row.get("contractSymbol") or ""
     option_type = "call" if symbol[-9:-8].upper() == "C" else "put"
@@ -128,10 +126,9 @@ def contract_from_yfinance(row, expiration, underlying):
     )
 
 
-# ----------------------------------------------------------------------
-# Enrichment: time to expiry, IV resolution (back-solve), recomputed Greeks
-# ----------------------------------------------------------------------
-def enrich(contract, spot, rate_fn, dividend_yield, now):
+def enrich(contract: OptionContract, spot: Optional[float],
+           rate_fn: Optional[Callable[[float], Optional[float]]],
+           dividend_yield: Optional[float], now: dt.datetime) -> OptionContract:
     """Fill time_to_expiry, rate, IV (back-solved if needed), and fresh Greeks."""
     T = _time_to_expiry(contract.expiration, now)
     contract.time_to_expiry = T
@@ -139,14 +136,14 @@ def enrich(contract, spot, rate_fn, dividend_yield, now):
     contract.rate_used = r
     q = dividend_yield or 0.0
 
-    # IV source policy (Option C): use the provider's own IV when it is valid, and
+    # IV source policy: use the provider's own IV when it is valid, and
     # compute IV from the market price via the engine only when the provider field
     # is missing or degenerate (e.g. bid=ask=0 with a near-zero IV over a close).
     # iv_source records which was used ('alpaca'/'yfinance' vs 'computed').
     provider_iv = contract.iv
     iv = None
     if provider_iv is not None and _IV_MIN_TRUST <= provider_iv <= _IV_MAX_PLAUSIBLE:
-        iv = provider_iv  # keep the existing provider iv_source label
+        iv = provider_iv
     else:
         price = contract.mid if contract.mid is not None else contract.last
         if spot and T > 0 and price and price > 0:
@@ -174,7 +171,8 @@ def enrich(contract, spot, rate_fn, dividend_yield, now):
     return contract
 
 
-def _reconcile_iv_by_strike(contracts, spot, dividend_yield):
+def _reconcile_iv_by_strike(contracts: List[OptionContract], spot: Optional[float],
+                            dividend_yield: Optional[float]) -> None:
     """
     Enforce call/put IV equality at each strike (put-call parity), using the
     out-of-the-money side as the reliable source. A deep-ITM option back-solves to
@@ -207,12 +205,16 @@ def _reconcile_iv_by_strike(contracts, spot, dividend_yield):
             itm.greeks_source = "recomputed"
 
 
-# ----------------------------------------------------------------------
-# Chain builder with the source policy
-# ----------------------------------------------------------------------
-def build_chain(underlying, *, alpaca_snapshots=None, yfinance_by_expiration=None,
-                spot, rate_fn, dividend_yield, dividend_source=None, now,
-                iv_source="auto"):
+def build_chain(underlying: str, *,
+                alpaca_snapshots: Optional[Dict[str, Any]] = None,
+                yfinance_by_expiration: Optional[
+                    Dict[dt.date, Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]]
+                ] = None,
+                spot: Optional[float],
+                rate_fn: Optional[Callable[[float], Optional[float]]],
+                dividend_yield: Optional[float], dividend_source: Optional[str] = None,
+                now: dt.datetime,
+                iv_source: str = "auto") -> OptionChain:
     """
     Assemble a normalized OptionChain. alpaca_snapshots is the raw snapshots dict;
     yfinance_by_expiration maps an expiration date -> (calls_rows, puts_rows).

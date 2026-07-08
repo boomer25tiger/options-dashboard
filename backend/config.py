@@ -8,6 +8,7 @@ the data layer. Nothing here prints secrets.
 """
 import os
 from dataclasses import dataclass
+from typing import Dict, Optional
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_ENV_PATH = os.path.join(PROJECT_ROOT, ".env")
@@ -20,7 +21,7 @@ _ALPACA_KEYS = (
 )
 
 
-def load_env(path=DEFAULT_ENV_PATH):
+def load_env(path: str = DEFAULT_ENV_PATH) -> Dict[str, str]:
     """Parse KEY=VALUE lines from a .env file into a dict. Missing file -> {}."""
     env = {}
     if not os.path.exists(path):
@@ -35,7 +36,7 @@ def load_env(path=DEFAULT_ENV_PATH):
     return env
 
 
-def _merged_env():
+def _merged_env() -> Dict[str, str]:
     """.env values, with real process environment variables taking precedence."""
     merged = load_env()
     for key in _ALPACA_KEYS:
@@ -56,7 +57,7 @@ class Settings:
     account_url: str
 
 
-def get_settings(env=None):
+def get_settings(env: Optional[Dict[str, str]] = None) -> Settings:
     env = env if env is not None else _merged_env()
     return Settings(
         data_url=env.get("APCA_API_DATA_URL", "https://data.alpaca.markets"),
@@ -64,7 +65,7 @@ def get_settings(env=None):
     )
 
 
-def get_alpaca_credentials(env=None):
+def get_alpaca_credentials(env: Optional[Dict[str, str]] = None) -> AlpacaCredentials:
     """Return AlpacaCredentials, or raise a clear error if keys are absent."""
     env = env if env is not None else _merged_env()
     key_id = env.get("APCA_API_KEY_ID")
@@ -77,7 +78,7 @@ def get_alpaca_credentials(env=None):
     return AlpacaCredentials(key_id=key_id, secret=secret)
 
 
-def mask(value):
+def mask(value: Optional[str]) -> str:
     """Mask a secret for logging. Never returns the full value."""
     if not value:
         return "<empty>"

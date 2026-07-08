@@ -5,6 +5,8 @@ yfinance is an unofficial scraper and can break when Yahoo changes its site. Eve
 call is wrapped so a failure raises YFinanceError with a clear message rather than
 surfacing a raw exception to the caller.
 """
+from typing import Any, Dict, List, Optional, Tuple
+
 import yfinance as yf
 
 
@@ -21,7 +23,7 @@ TREASURY_TICKERS = {
 }
 
 
-def get_expirations(ticker):
+def get_expirations(ticker: str) -> List[str]:
     try:
         exps = yf.Ticker(ticker).options
     except Exception as exc:
@@ -29,7 +31,7 @@ def get_expirations(ticker):
     return list(exps or [])
 
 
-def get_option_chain(ticker, expiration):
+def get_option_chain(ticker: str, expiration: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Return (calls_records, puts_records) as lists of dicts for one expiration."""
     try:
         chain = yf.Ticker(ticker).option_chain(expiration)
@@ -40,7 +42,7 @@ def get_option_chain(ticker, expiration):
     return chain.calls.to_dict("records"), chain.puts.to_dict("records")
 
 
-def get_spot(ticker):
+def get_spot(ticker: str) -> Optional[float]:
     """Last price for the underlying. Tries fast_info, then recent daily history."""
     t = yf.Ticker(ticker)
     try:
@@ -66,7 +68,7 @@ def get_spot(ticker):
     return None
 
 
-def get_dividend_yield(ticker):
+def get_dividend_yield(ticker: str) -> float:
     """
     Trailing dividend yield as a decimal (0.0076 = 0.76%), or 0.0 if none is reported.
 
@@ -81,7 +83,7 @@ def get_dividend_yield(ticker):
     except Exception as exc:
         raise YFinanceError(f"info for {ticker} failed: {exc}") from exc
 
-    def _sane_fraction(v):
+    def _sane_fraction(v: Any) -> bool:
         return v is not None and 0.0 <= float(v) < 0.5
 
     # 1. Trailing yield field is a clean fraction across yfinance versions.
@@ -112,7 +114,7 @@ def get_dividend_yield(ticker):
     return 0.0
 
 
-def get_treasury_rates():
+def get_treasury_rates() -> Dict[float, float]:
     """
     Return {tenor_in_years: rate_as_decimal} from the Treasury yield indices.
     Yahoo quotes them in percent, so each is divided by 100. Tickers that fail are

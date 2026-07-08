@@ -22,7 +22,7 @@ import datetime as dt
 import os
 import sys
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -42,7 +42,7 @@ class Leg:
     entry_price: Optional[float] = None  # per-share basis; None -> theoretical
     multiplier: int = 100
 
-    def is_option(self):
+    def is_option(self) -> bool:
         return self.option_type in ("call", "put")
 
 
@@ -54,24 +54,21 @@ class MarketContext:
     dividend_yield: float = 0.0
 
 
-# ----------------------------------------------------------------------
-# Per-leg helpers
-# ----------------------------------------------------------------------
-def _intrinsic(leg, S):
+def _intrinsic(leg: Leg, S: float) -> float:
     if leg.option_type == "call":
         return max(S - leg.strike, 0.0)
     if leg.option_type == "put":
         return max(leg.strike - S, 0.0)
-    return S  # stock
+    return S
 
 
-def _leg_T(leg, valuation_dt):
+def _leg_T(leg: Leg, valuation_dt: dt.datetime) -> Optional[float]:
     if not leg.is_option() or leg.expiration is None:
         return None
     return time_to_expiry(leg.expiration, valuation_dt)
 
 
-def leg_value(leg, S, valuation_dt, ctx):
+def leg_value(leg: Leg, S: float, valuation_dt: dt.datetime, ctx: MarketContext) -> float:
     """Per-share theoretical value of the leg at underlying S and a valuation date."""
     if leg.option_type == "stock":
         return S
@@ -82,7 +79,7 @@ def leg_value(leg, S, valuation_dt, ctx):
     return bs_price(S, leg.strike, T, r, leg.sigma, leg.option_type, ctx.dividend_yield)
 
 
-def leg_entry(leg, ctx):
+def leg_entry(leg: Leg, ctx: MarketContext) -> float:
     """Cost basis per share: the supplied entry price, or the current theoretical value."""
     if leg.entry_price is not None:
         return leg.entry_price
@@ -91,14 +88,11 @@ def leg_entry(leg, ctx):
     return leg_value(leg, ctx.spot, ctx.now, ctx)
 
 
-def _leg_pnl(leg, S, valuation_dt, ctx, entry):
+def _leg_pnl(leg: Leg, S: float, valuation_dt: dt.datetime, ctx: MarketContext, entry: float) -> float:
     return leg.quantity * leg.multiplier * (leg_value(leg, S, valuation_dt, ctx) - entry)
 
 
-# ----------------------------------------------------------------------
-# Position aggregates
-# ----------------------------------------------------------------------
-def position_greeks(legs, ctx):
+def position_greeks(legs: List[Leg], ctx: MarketContext) -> Dict[str, float]:
     """Net Greeks in engine-native units, scaled by signed quantity * multiplier."""
     net = {"delta": 0.0, "gamma": 0.0, "vega": 0.0, "theta": 0.0, "rho": 0.0}
     for leg in legs:
@@ -117,12 +111,13 @@ def position_greeks(legs, ctx):
     return net
 
 
-def net_cost(legs, ctx):
+def net_cost(legs: List[Leg], ctx: MarketContext) -> float:
     """Net dollars: positive = debit paid, negative = credit received."""
     return sum(leg.quantity * leg.multiplier * leg_entry(leg, ctx) for leg in legs)
 
 
-def expiry_pnl(legs, S, ctx, entries=None):
+def expiry_pnl(legs: List[Leg], S: float, ctx: MarketContext,
+               entries: Optional[Dict[int, float]] = None) -> float:
     """Combined P&L at the final expiration, every leg at intrinsic."""
     if entries is None:
         entries = {id(l): leg_entry(l, ctx) for l in legs}
@@ -133,12 +128,14 @@ def expiry_pnl(legs, S, ctx, entries=None):
     return total
 
 
-def _s_max(legs, ctx, factor):
+def _s_max(legs: List[Leg], ctx: MarketContext, factor: float) -> float:
     strikes = [l.strike for l in legs if l.strike]
     return max(strikes + [ctx.spot]) * factor
 
 
-def payoff_curve(legs, ctx, valuation_dts, s_min=None, s_max=None, points=121):
+def payoff_curve(legs: List[Leg], ctx: MarketContext, valuation_dts: Sequence[dt.datetime],
+                 s_min: Optional[float] = None, s_max: Optional[float] = None,
+                 points: int = 121) -> Tuple[List[float], Dict[dt.datetime, List[float]]]:
     """
     Time-aware P&L profile. Returns (xs, {valuation_dt: [y, ...]}), one series per
     date. Option legs not yet expired at a date are repriced via the engine; expired
@@ -164,7 +161,8 @@ def payoff_curve(legs, ctx, valuation_dts, s_min=None, s_max=None, points=121):
     return xs, curves
 
 
-def breakevens(legs, ctx, s_max_factor=3.0, samples=800):
+def breakevens(legs: List[Leg], ctx: MarketContext, s_max_factor: float = 3.0,
+               samples: int = 800) -> List[float]:
     """Underlying prices where the expiry P&L crosses zero, found numerically."""
     entries = {id(l): leg_entry(l, ctx) for l in legs}
     hi = _s_max(legs, ctx, s_max_factor)
@@ -196,7 +194,8 @@ def breakevens(legs, ctx, s_max_factor=3.0, samples=800):
     return dedup
 
 
-def max_profit_loss(legs, ctx, s_max_factor=3.0):
+def max_profit_loss(legs: List[Leg], ctx: MarketContext,
+                    s_max_factor: float = 3.0) -> Tuple[Optional[float], Optional[float]]:
     """
     (max_profit, max_loss) in dollars; None means unbounded. The expiry payoff is
     piecewise linear, so finite extrema sit at S=0, at a strike, or at the far end.
@@ -217,22 +216,19 @@ def max_profit_loss(legs, ctx, s_max_factor=3.0):
     return max_profit, max_loss
 
 
-# ----------------------------------------------------------------------
-# Probability of profit (lognormal terminal distribution)
-# ----------------------------------------------------------------------
-def _final_expiration(legs):
+def _final_expiration(legs: List[Leg]) -> Optional[dt.date]:
     exps = [l.expiration for l in legs if l.expiration]
     return max(exps) if exps else None
 
 
-def _atm_sigma(legs, ctx):
+def _atm_sigma(legs: List[Leg], ctx: MarketContext) -> Optional[float]:
     opts = [l for l in legs if l.is_option() and l.sigma]
     if not opts:
         return None
     return min(opts, key=lambda l: abs(l.strike - ctx.spot)).sigma
 
 
-def _prob_greater(S0, x, T, r, sigma, q):
+def _prob_greater(S0: float, x: float, T: float, r: float, sigma: float, q: float) -> float:
     """Risk-neutral P(S_T > x) = N(d2)."""
     if x <= 0:
         return 1.0
@@ -241,7 +237,8 @@ def _prob_greater(S0, x, T, r, sigma, q):
     return prob_itm(S0, x, T, r, sigma, "call", q)
 
 
-def prob_of_profit(legs, ctx, sigma=None, expiration=None):
+def prob_of_profit(legs: List[Leg], ctx: MarketContext, sigma: Optional[float] = None,
+                   expiration: Optional[dt.date] = None) -> Optional[float]:
     """
     Risk-neutral probability the position finishes profitable at expiration, under
     the lognormal model, integrating the terminal distribution over the profitable
@@ -269,7 +266,7 @@ def prob_of_profit(legs, ctx, sigma=None, expiration=None):
     return pop
 
 
-def summarize(legs, ctx):
+def summarize(legs: List[Leg], ctx: MarketContext) -> Dict[str, Any]:
     """Bundle the position metrics the Strategy page shows."""
     mp, ml = max_profit_loss(legs, ctx)
     return {
@@ -282,7 +279,7 @@ def summarize(legs, ctx):
     }
 
 
-def leg_breakdown(legs, ctx):
+def leg_breakdown(legs: List[Leg], ctx: MarketContext) -> List[Dict[str, Any]]:
     """
     Per-leg price, signed dollar cost, and signed Greek contributions in display
     units. The cost column sums to the position's net cost and the Greek columns

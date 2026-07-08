@@ -17,6 +17,11 @@ import math
 import os
 import statistics
 import sys
+from datetime import date
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:
+    from backend.data.models import OptionChain
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -48,7 +53,7 @@ _HI = [0.36, 20.0, 0.36, 3.0, 0.5]       # variances capped at 60% vol, sane for
 _TENOR_TARGETS_DAYS = (14, 30, 60, 90, 150, 240, 365)
 
 
-def select_expirations(all_dates, today, max_exps=7):
+def select_expirations(all_dates: Sequence[date], today: date, max_exps: int = 7) -> List[date]:
     """Pick a maturity-diverse subset of expirations nearest the tenor targets."""
     usable = [d for d in all_dates if (d - today).days >= 5]
     if not usable:
@@ -60,7 +65,8 @@ def select_expirations(all_dates, today, max_exps=7):
     return sorted(chosen)[:max_exps]
 
 
-def _select_instruments(chain, spot, rate_fn, q):
+def _select_instruments(chain: "OptionChain", spot: float,
+                        rate_fn: Callable[[float], float], q: float) -> List[Dict[str, Any]]:
     """Out-of-the-money options sampled across the wing-to-wing band, per slice.
 
     For each expiration and each moneyness target, take the nearest strike of the
@@ -103,7 +109,7 @@ def _select_instruments(chain, spot, rate_fn, q):
     return instruments
 
 
-def _seed(instruments):
+def _seed(instruments: List[Dict[str, Any]]) -> List[float]:
     """Initial parameter guess from the instruments' own implied vols."""
     ivs = [ins["iv"] for ins in instruments]
     near = min(instruments, key=lambda ins: (ins["T"], abs(math.log(ins["K"]))))
@@ -113,7 +119,8 @@ def _seed(instruments):
     return [min(max(v, _LO[i]), _HI[i]) for i, v in enumerate(x0)]
 
 
-def _iv_errors(instruments, params, spot):
+def _iv_errors(instruments: List[Dict[str, Any]], params: Sequence[float],
+               spot: float) -> List[Tuple[date, float, float]]:
     """Per-instrument (expiration, tenor, Heston-IV minus market-IV)."""
     v0, kappa, theta, xi, rho = params
     errs = []
@@ -126,11 +133,11 @@ def _iv_errors(instruments, params, spot):
     return errs
 
 
-def _rmse(values):
+def _rmse(values: Sequence[float]) -> Optional[float]:
     return math.sqrt(sum(v * v for v in values) / len(values)) if values else None
 
 
-def calibrate_instruments(instruments, spot):
+def calibrate_instruments(instruments: List[Dict[str, Any]], spot: float) -> Dict[str, Any]:
     """Fit Heston to a prepared instrument list. See module docstring for the shape."""
     if not _HAVE_SCIPY:
         return {"ok": False, "reason": "scipy unavailable"}
@@ -141,7 +148,7 @@ def calibrate_instruments(instruments, spot):
     floor = max(0.05, 0.02 * statistics.median(prices))
     x0 = _seed(instruments)
 
-    def residuals(p):
+    def residuals(p: Sequence[float]) -> List[float]:
         v0, kappa, theta, xi, rho = p
         return [
             (heston_price(spot, ins["K"], ins["T"], ins["r"], v0, kappa, theta, xi,
@@ -183,7 +190,8 @@ def calibrate_instruments(instruments, spot):
     }
 
 
-def calibrate_from_chain(chain, spot, rate_fn, dividend_yield):
+def calibrate_from_chain(chain: "OptionChain", spot: float, rate_fn: Callable[[float], float],
+                         dividend_yield: Optional[float]) -> Dict[str, Any]:
     """Select instruments from a live chain and calibrate."""
     instruments = _select_instruments(chain, spot, rate_fn, dividend_yield or 0.0)
     return calibrate_instruments(instruments, spot)

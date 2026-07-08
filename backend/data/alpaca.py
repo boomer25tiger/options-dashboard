@@ -6,17 +6,21 @@ though frozen at the last session. Every call raises AlpacaError with a short,
 non-sensitive message on failure.
 """
 import datetime as dt
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import requests
 
 from backend.config import get_alpaca_credentials, get_settings
+
+if TYPE_CHECKING:
+    from backend.config import AlpacaCredentials, Settings
 
 
 class AlpacaError(RuntimeError):
     """Raised on a non-200 response or an unexpected payload."""
 
 
-def _headers(credentials=None):
+def _headers(credentials: Optional["AlpacaCredentials"] = None) -> Dict[str, str]:
     cred = credentials or get_alpaca_credentials()
     return {
         "APCA-API-KEY-ID": cred.key_id,
@@ -24,13 +28,13 @@ def _headers(credentials=None):
     }
 
 
-def _as_date_str(value):
+def _as_date_str(value: Any) -> str:
     if isinstance(value, (dt.date, dt.datetime)):
         return value.strftime("%Y-%m-%d")
     return str(value)
 
 
-def parse_occ_symbol(symbol):
+def parse_occ_symbol(symbol: str) -> Tuple[str, dt.date, str, float]:
     """
     Parse an OCC option symbol into (underlying, expiration_date, option_type, strike).
 
@@ -46,10 +50,15 @@ def parse_occ_symbol(symbol):
     return underlying, expiration, option_type, strike
 
 
-def get_option_snapshots(underlying, *, expiration_gte=None, expiration_lte=None,
-                         strike_gte=None, strike_lte=None, option_type=None,
-                         feed="indicative", limit=100, max_pages=1,
-                         credentials=None, settings=None, session=None):
+def get_option_snapshots(underlying: str, *, expiration_gte: Optional[Any] = None,
+                         expiration_lte: Optional[Any] = None,
+                         strike_gte: Optional[float] = None,
+                         strike_lte: Optional[float] = None,
+                         option_type: Optional[str] = None,
+                         feed: str = "indicative", limit: int = 100, max_pages: int = 1,
+                         credentials: Optional["AlpacaCredentials"] = None,
+                         settings: Optional["Settings"] = None,
+                         session: Optional[Any] = None) -> Dict[str, Any]:
     """
     Fetch option snapshots for an underlying. Returns the `snapshots` dict keyed by
     OCC symbol. Follows pagination up to max_pages to bound the size of the pull.
@@ -87,7 +96,9 @@ def get_option_snapshots(underlying, *, expiration_gte=None, expiration_lte=None
     return snapshots
 
 
-def get_clock(credentials=None, settings=None, session=None):
+def get_clock(credentials: Optional["AlpacaCredentials"] = None,
+              settings: Optional["Settings"] = None,
+              session: Optional[Any] = None) -> Dict[str, Any]:
     """
     Market clock from the account host: is_open, next_open, next_close, timestamp.
     Authoritative for holidays, unlike a weekday/time heuristic.
@@ -101,8 +112,11 @@ def get_clock(credentials=None, settings=None, session=None):
     return resp.json()
 
 
-def get_stock_bars(symbol, *, start, end=None, timeframe="1Day", limit=1000,
-                   feed="iex", credentials=None, settings=None, session=None):
+def get_stock_bars(symbol: str, *, start: Any, end: Optional[Any] = None,
+                   timeframe: str = "1Day", limit: int = 1000,
+                   feed: str = "iex", credentials: Optional["AlpacaCredentials"] = None,
+                   settings: Optional["Settings"] = None,
+                   session: Optional[Any] = None) -> List[Dict[str, Any]]:
     """
     Daily stock bars for realized-vol calculation. Returns a list of bar dicts with
     't' (timestamp) and 'c' (close), oldest first. Free tier serves the IEX feed.

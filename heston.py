@@ -23,9 +23,10 @@ Price via the two Heston probabilities:
 """
 import cmath
 import math
+from typing import List, Optional, Sequence, Tuple
 
 
-def _gauss_legendre(n):
+def _gauss_legendre(n: int) -> Tuple[List[float], List[float]]:
     """Nodes and weights of the n-point Gauss-Legendre rule on [-1, 1].
 
     Roots of the Legendre polynomial P_n found by Newton's method, using the
@@ -60,7 +61,9 @@ _GL_NODES, _GL_WEIGHTS = _gauss_legendre(_GL_N)
 _U_MAX = 200.0  # upper truncation of the semi-infinite Fourier integral
 
 
-def _char_func(phi, j, x, T, r, q, v0, kappa, theta, xi, rho):
+def _char_func(phi: float, j: int, x: float, T: float, r: float, q: float,
+               v0: float, kappa: float, theta: float, xi: float,
+               rho: float) -> complex:
     """Heston characteristic function f_j(phi), little-trap form. x = ln(S)."""
     if j == 1:
         u = 0.5
@@ -79,7 +82,9 @@ def _char_func(phi, j, x, T, r, q, v0, kappa, theta, xi, rho):
     return cmath.exp(C + D * v0 + 1j * phi * x)
 
 
-def _prob(j, S, K, T, r, q, v0, kappa, theta, xi, rho, nodes, weights):
+def _prob(j: int, S: float, K: float, T: float, r: float, q: float,
+          v0: float, kappa: float, theta: float, xi: float, rho: float,
+          nodes: Sequence[float], weights: Sequence[float]) -> float:
     """Heston probability P_j via Gauss-Legendre quadrature over [0, U_MAX]."""
     x = math.log(S)
     ln_k = math.log(K)
@@ -92,8 +97,9 @@ def _prob(j, S, K, T, r, q, v0, kappa, theta, xi, rho, nodes, weights):
     return 0.5 + (half * total) / math.pi
 
 
-def heston_price(S, K, T, r, v0, kappa, theta, xi, rho,
-                 option_type="call", q=0.0, gl_n=None):
+def heston_price(S: float, K: float, T: float, r: float, v0: float, kappa: float,
+                 theta: float, xi: float, rho: float, option_type: str = "call",
+                 q: float = 0.0, gl_n: Optional[int] = None) -> float:
     """Price a European option under Heston. gl_n overrides the quadrature order."""
     otype = option_type.lower()
     if T <= 0:
@@ -117,6 +123,6 @@ def heston_price(S, K, T, r, v0, kappa, theta, xi, rho,
     return call - S * math.exp(-q * T) + K * math.exp(-r * T)
 
 
-def feller_ok(kappa, theta, xi):
+def feller_ok(kappa: float, theta: float, xi: float) -> bool:
     """Feller condition 2*kappa*theta >= xi^2 keeps variance strictly positive."""
     return 2.0 * kappa * theta >= xi * xi

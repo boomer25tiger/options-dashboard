@@ -7,6 +7,7 @@ points as a fallback, then a flat single rate. The resolved curve is cached for 
 few hours because the end-of-day data does not change intraday.
 """
 import time
+from typing import Callable, Dict, Optional, Tuple
 
 from backend.data import fred, yfinance_client
 
@@ -14,7 +15,7 @@ _CURVE_CACHE = {}
 _TTL_SECONDS = 6 * 3600
 
 
-def interpolate_rate(t_years, curve):
+def interpolate_rate(t_years: float, curve: Dict[float, float]) -> Optional[float]:
     """
     Linearly interpolate the annual rate at t_years from a {tenor: rate} curve.
     Below the shortest tenor returns the shortest rate; above the longest returns
@@ -35,7 +36,8 @@ def interpolate_rate(t_years, curve):
     return curve[tenors[-1]]
 
 
-def build_curve(treasury_rates, fallback_rate=None):
+def build_curve(treasury_rates: Optional[Dict[float, float]],
+                fallback_rate: Optional[float] = None) -> Callable[[float], Optional[float]]:
     """
     Return a callable rate(t_years). With a usable curve it interpolates; otherwise
     it falls back to a flat single rate (fallback_rate, or 0.0).
@@ -46,7 +48,7 @@ def build_curve(treasury_rates, fallback_rate=None):
     return lambda t: flat
 
 
-def fetch_risk_free_points(use_cache=True):
+def fetch_risk_free_points(use_cache: bool = True) -> Tuple[Optional[Dict[float, float]], Optional[str], Optional[str]]:
     """
     Return (points, source, as_of). FRED is primary (dense, end-of-day), Yahoo the
     fallback (four coarse points), then (None, None, None). Cached for a few hours
@@ -77,7 +79,7 @@ def fetch_risk_free_points(use_cache=True):
     return None, None, None
 
 
-def get_rate_curve(fallback_rate=0.04, use_cache=True):
+def get_rate_curve(fallback_rate: float = 0.04, use_cache: bool = True) -> Tuple[Callable[[float], Optional[float]], str, Dict[float, float], Optional[str]]:
     """
     Return (rate_fn, source, points, as_of). Falls back to a flat rate if no source
     is reachable, so callers always receive a usable function.

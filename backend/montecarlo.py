@@ -13,19 +13,20 @@ carries its standard error and a 95% confidence interval, and antithetic variate
 tighten the estimate. A fixed default seed keeps a displayed price reproducible.
 """
 import math
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
 
-def _terminal(S, T, r, sigma, q, z):
+def _terminal(S: float, T: float, r: float, sigma: float, q: float, z: np.ndarray) -> np.ndarray:
     return S * np.exp((r - q - 0.5 * sigma * sigma) * T + sigma * math.sqrt(T) * z)
 
 
-def _payoff(s, K, option_type):
+def _payoff(s: np.ndarray, K: float, option_type: str) -> np.ndarray:
     return np.maximum(s - K, 0.0) if option_type == "call" else np.maximum(K - s, 0.0)
 
 
-def _summary(disc_payoff):
+def _summary(disc_payoff: np.ndarray) -> Dict[str, Any]:
     price = float(disc_payoff.mean())
     stderr = float(disc_payoff.std(ddof=1) / math.sqrt(len(disc_payoff)))
     return {"price": price, "stderr": stderr,
@@ -33,8 +34,10 @@ def _summary(disc_payoff):
             "n_paths": int(len(disc_payoff))}
 
 
-def price_european(S, K, T, r, sigma, option_type="call", q=0.0,
-                   n_paths=200_000, seed=12345, antithetic=True):
+def price_european(S: float, K: float, T: float, r: float, sigma: float,
+                   option_type: str = "call", q: float = 0.0,
+                   n_paths: int = 200_000, seed: int = 12345,
+                   antithetic: bool = True) -> Dict[str, Any]:
     """Vanilla European by terminal-value simulation (no time-stepping needed)."""
     otype = option_type.lower()
     if T <= 0 or sigma <= 0:
@@ -50,8 +53,10 @@ def price_european(S, K, T, r, sigma, option_type="call", q=0.0,
     return _summary(math.exp(-r * T) * _payoff(st, K, otype))
 
 
-def european_convergence(S, K, T, r, sigma, option_type="call", q=0.0,
-                         checkpoints=(1000, 5000, 25000, 100000, 400000), seed=12345):
+def european_convergence(S: float, K: float, T: float, r: float, sigma: float,
+                         option_type: str = "call", q: float = 0.0,
+                         checkpoints: Sequence[int] = (1000, 5000, 25000, 100000, 400000),
+                         seed: int = 12345) -> List[Dict[str, Any]]:
     """Running price and 95% band at increasing path counts, to show convergence."""
     otype = option_type.lower()
     if T <= 0 or sigma <= 0:
@@ -70,7 +75,8 @@ def european_convergence(S, K, T, r, sigma, option_type="call", q=0.0,
     return out
 
 
-def _paths(S, T, r, sigma, q, n_paths, n_steps, seed, antithetic=True):
+def _paths(S: float, T: float, r: float, sigma: float, q: float, n_paths: int,
+           n_steps: int, seed: int, antithetic: bool = True) -> np.ndarray:
     """Simulated GBM paths, shape (paths, n_steps+1), first column S."""
     rng = np.random.default_rng(seed)
     n = n_paths // 2 if antithetic else n_paths
@@ -85,8 +91,10 @@ def _paths(S, T, r, sigma, q, n_paths, n_steps, seed, antithetic=True):
     return np.concatenate([head, body], axis=1)
 
 
-def price_asian(S, K, T, r, sigma, option_type="call", q=0.0, average="arithmetic",
-                n_paths=100_000, n_steps=50, seed=12345):
+def price_asian(S: float, K: float, T: float, r: float, sigma: float,
+                option_type: str = "call", q: float = 0.0, average: str = "arithmetic",
+                n_paths: int = 100_000, n_steps: int = 50,
+                seed: int = 12345) -> Optional[Dict[str, Any]]:
     """Asian option on the average of the monitored path (open excluded)."""
     otype = option_type.lower()
     if T <= 0 or sigma <= 0 or n_steps < 1:
@@ -100,8 +108,10 @@ def price_asian(S, K, T, r, sigma, option_type="call", q=0.0, average="arithmeti
     return _summary(math.exp(-r * T) * _payoff(avg, K, otype))
 
 
-def price_barrier(S, K, T, r, sigma, barrier, barrier_type="up-and-out",
-                  option_type="call", q=0.0, n_paths=100_000, n_steps=100, seed=12345):
+def price_barrier(S: float, K: float, T: float, r: float, sigma: float, barrier: float,
+                  barrier_type: str = "up-and-out", option_type: str = "call", q: float = 0.0,
+                  n_paths: int = 100_000, n_steps: int = 100,
+                  seed: int = 12345) -> Optional[Dict[str, Any]]:
     """
     Barrier option, monitored at each step. barrier_type is one of
     up-and-out, up-and-in, down-and-out, down-and-in.
@@ -122,8 +132,10 @@ def price_barrier(S, K, T, r, sigma, barrier, barrier_type="up-and-out",
     return result
 
 
-def sample_paths(S, T, r, sigma, q=0.0, n_paths=200, n_steps=80, seed=7,
-                 barrier=None, barrier_type=None):
+def sample_paths(S: float, T: float, r: float, sigma: float, q: float = 0.0,
+                 n_paths: int = 200, n_steps: int = 80, seed: int = 7,
+                 barrier: Optional[float] = None,
+                 barrier_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     A small sample of simulated paths for display, with the time axis in years and,
     when a barrier is given, a per-path flag for whether it was breached. The full

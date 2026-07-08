@@ -22,9 +22,7 @@ from datetime import datetime, timezone
 import requests
 
 
-# ----------------------------------------------------------------------
 # Load .env (no python-dotenv dependency; parse KEY=VALUE lines ourselves)
-# ----------------------------------------------------------------------
 def load_env(path=".env"):
     env = {}
     if not os.path.exists(path):
@@ -54,9 +52,6 @@ def hr(title):
     print("=" * 70)
 
 
-# ----------------------------------------------------------------------
-# Test 1 — Alpaca options snapshot
-# ----------------------------------------------------------------------
 def test_alpaca(env):
     hr("TEST 1 — ALPACA OPTIONS SNAPSHOT (SPY)")
 
@@ -150,9 +145,6 @@ def test_alpaca(env):
     return True
 
 
-# ----------------------------------------------------------------------
-# Test 2 — yfinance option chain
-# ----------------------------------------------------------------------
 def test_yfinance():
     hr("TEST 2 — YFINANCE OPTION CHAIN (SPY)")
 
@@ -220,7 +212,6 @@ def test_yfinance():
     return True
 
 
-# ----------------------------------------------------------------------
 def main():
     now_utc = datetime.now(timezone.utc)
     print("Connectivity test run at (UTC):", now_utc.isoformat(timespec="seconds"))

@@ -35,12 +35,10 @@ def main():
     print(f"Data-layer check for {TICKER} at {now.isoformat(timespec='seconds')}")
     print("Market is closed today (holiday); values reflect the last session.")
 
-    # -- Credentials ---------------------------------------------------
     hr("CREDENTIALS")
     cred = get_alpaca_credentials()
     print(f"  Alpaca key id: {mask(cred.key_id)}  (secret present, not shown)")
 
-    # -- Alpaca snapshots ---------------------------------------------
     hr("ALPACA SNAPSHOTS")
     snaps = alpaca.get_option_snapshots(
         TICKER,
@@ -53,7 +51,6 @@ def main():
     check("Alpaca returned option snapshots", len(snaps) > 0,
           f"{len(snaps)} contracts, {n_alpaca_iv} with Alpaca IV")
 
-    # -- yfinance chain ------------------------------------------------
     hr("YFINANCE CHAIN")
     exps = yfinance_client.get_expirations(TICKER)
     check("yfinance returned expirations", len(exps) > 0, f"{len(exps)} expirations")
@@ -67,13 +64,11 @@ def main():
         check(f"yfinance chain {exp_str} has IV", iv_present > 0,
               f"{len(calls)} calls, {iv_present} with IV")
 
-    # -- Spot ----------------------------------------------------------
     hr("SPOT")
     spot = yfinance_client.get_spot(TICKER)
     check("spot price looks sane", spot is not None and 50 < spot < 5000,
           f"spot={spot}")
 
-    # -- Risk-free curve (FRED primary, Yahoo fallback) ----------------
     hr("RISK-FREE CURVE")
     rate_fn, rate_source, tsy, rate_asof = rates.get_rate_curve()
     print(f"  source: {rate_source}   as_of: {rate_asof}   points: {len(tsy)}")
@@ -96,13 +91,11 @@ def main():
                   min(tsy[lo], tsy[hi]) - 1e-9 <= r_mid <= max(tsy[lo], tsy[hi]) + 1e-9,
                   f"{round(tsy[lo],4)} <= {round(r_mid,4)} <= {round(tsy[hi],4)}")
 
-    # -- Dividend yield ------------------------------------------------
     hr("DIVIDEND YIELD")
     q, q_src = dividends.resolve_dividend_yield(TICKER)
     check("dividend yield in a sane band", 0.0 <= q < 0.05,
           f"q={round(q, 4)} (source: {q_src})")
 
-    # -- Realized vol --------------------------------------------------
     hr("REALIZED VOLATILITY")
     bars = alpaca.get_stock_bars(TICKER, start=today - dt.timedelta(days=150))
     closes = [b["c"] for b in bars]
@@ -113,7 +106,6 @@ def main():
     check("realized vol computed for all windows",
           all(v is not None and 0 < v < 2 for v in rv.values()))
 
-    # -- Normalized chain (auto) --------------------------------------
     hr("NORMALIZED CHAIN (auto source, Greeks recomputed vs current clock)")
     chain = normalize.build_chain(
         TICKER,
@@ -173,7 +165,6 @@ def main():
     check("put deltas within [-1, 0]", put_deltas_ok)
     check("gammas non-negative", gamma_ok)
 
-    # -- Engine round-trip through the layer's back-solve --------------
     hr("IV BACK-SOLVE ROUND-TRIP")
     S, K, T, r, sig = 500.0, 505.0, 0.25, 0.04, 0.22
     synth_price = bs_price(S, K, T, r, sig, "call", 0.0)
@@ -182,7 +173,6 @@ def main():
           solved is not None and abs(solved - sig) < 1e-3,
           f"input {sig}, recovered {round(solved, 6) if solved else None}")
 
-    # -- Summary -------------------------------------------------------
     hr("SUMMARY")
     print(f"  {len(_PASSES)} passed, {len(_FAILS)} failed")
     if _FAILS:

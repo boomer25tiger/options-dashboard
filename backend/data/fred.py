@@ -9,6 +9,7 @@ intraday. The caller caches it.
 import csv
 import datetime as dt
 import io
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
@@ -34,17 +35,19 @@ class FredError(RuntimeError):
     pass
 
 
-def _latest_value(csv_text):
+def _latest_value(csv_text: str) -> Tuple[Optional[str], Optional[str]]:
     """Return (date_str, value_str) for the last numeric row, or (None, None)."""
     rows = list(csv.reader(io.StringIO(csv_text)))
     last_date, last_val = None, None
-    for row in rows[1:]:  # skip header
+    for row in rows[1:]:
         if len(row) >= 2 and row[1] not in (".", "", None):
             last_date, last_val = row[0], row[1]
     return last_date, last_val
 
 
-def get_treasury_curve(min_points=4, lookback_days=45, session=None, timeout=20):
+def get_treasury_curve(min_points: int = 4, lookback_days: int = 45,
+                       session: Optional[Any] = None,
+                       timeout: int = 20) -> Tuple[Dict[float, float], Optional[str]]:
     """
     Fetch the curve from FRED. Returns (curve, as_of_date_str) where curve maps
     tenor-in-years -> rate-as-decimal. Series that fail or lack a recent value are

@@ -13,6 +13,7 @@ under FastAPI's threadpool.
 import os
 import sqlite3
 from contextlib import closing
+from typing import Any, Dict, List, Optional, Sequence
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEFAULT_DB_PATH = os.path.join(_PROJECT_ROOT, "history.db")
@@ -25,17 +26,17 @@ METRIC_COLUMNS = [
 METRICS = set(METRIC_COLUMNS)
 
 
-def _db_path(path=None):
+def _db_path(path: Optional[str] = None) -> str:
     return path or os.environ.get("HISTORY_DB_PATH") or DEFAULT_DB_PATH
 
 
-def _connect(path=None):
+def _connect(path: Optional[str] = None) -> sqlite3.Connection:
     conn = sqlite3.connect(_db_path(path))
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def init_db(path=None):
+def init_db(path: Optional[str] = None) -> None:
     with closing(_connect(path)) as conn:
         conn.execute(
             """
@@ -56,7 +57,8 @@ def init_db(path=None):
         conn.commit()
 
 
-def record_visit(ticker, metrics, timestamp, path=None):
+def record_visit(ticker: str, metrics: Dict[str, Any], timestamp: str,
+                 path: Optional[str] = None) -> Dict[str, Any]:
     """Insert one visit row and return it as a dict."""
     init_db(path)
     columns = ["ticker", "timestamp"] + METRIC_COLUMNS
@@ -73,7 +75,8 @@ def record_visit(ticker, metrics, timestamp, path=None):
     return dict(row)
 
 
-def list_visits(ticker=None, limit=200, path=None):
+def list_visits(ticker: Optional[str] = None, limit: int = 200,
+                path: Optional[str] = None) -> List[Dict[str, Any]]:
     """Visits, most recent first, optionally filtered to one ticker."""
     init_db(path)
     with closing(_connect(path)) as conn:
@@ -91,7 +94,7 @@ def list_visits(ticker=None, limit=200, path=None):
     return [dict(r) for r in rows]
 
 
-def distinct_tickers(path=None):
+def distinct_tickers(path: Optional[str] = None) -> List[str]:
     init_db(path)
     with closing(_connect(path)) as conn:
         rows = conn.execute(
@@ -100,7 +103,8 @@ def distinct_tickers(path=None):
     return [r["ticker"] for r in rows]
 
 
-def metric_series(tickers, metric, path=None):
+def metric_series(tickers: Sequence[str], metric: str,
+                  path: Optional[str] = None) -> Dict[str, List[Dict[str, Any]]]:
     """
     Time series of one metric per ticker, oldest first, skipping null values.
     The metric name is validated against the whitelist before interpolation, so

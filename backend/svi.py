@@ -13,6 +13,7 @@ Note for later context: SVI and the planned Heston extension both fit a parametr
 model to the chain, but they remain separate features.
 """
 import math
+from typing import Any, Dict, Optional, Sequence
 
 try:
     import numpy as np
@@ -24,12 +25,12 @@ except Exception:  # pragma: no cover - scipy/numpy expected present
 MIN_POINTS = 6
 
 
-def total_variance(a, b, rho, m, sigma, k):
+def total_variance(a: float, b: float, rho: float, m: float, sigma: float, k: float) -> float:
     """Raw-SVI total implied variance at log-moneyness k."""
     return a + b * (rho * (k - m) + math.sqrt((k - m) ** 2 + sigma ** 2))
 
 
-def iv_from_params(params, k, T):
+def iv_from_params(params: Dict[str, float], k: float, T: float) -> Optional[float]:
     """Fitted implied vol at log-moneyness k for a slice of maturity T."""
     if T <= 0:
         return None
@@ -38,7 +39,7 @@ def iv_from_params(params, k, T):
     return math.sqrt(w / T) if w > 0 else None
 
 
-def fit_slice(ks, ws):
+def fit_slice(ks: Sequence[float], ws: Sequence[float]) -> Optional[Dict[str, Any]]:
     """
     Calibrate raw SVI to (log-moneyness, total-variance) points. Returns a params
     dict {a,b,rho,m,sigma,rmse,n} or None when the fit is unavailable or poor.
@@ -63,11 +64,11 @@ def fit_slice(ks, ws):
     # larger wings (which would otherwise pull the ATM fit off, badly for short T).
     w_floor = max(1e-6, 0.1 * w_med)
 
-    def model_w(p):
+    def model_w(p: Any) -> Any:
         a, b, rho, m, sig = p
         return a + b * (rho * (ks - m) + np.sqrt((ks - m) ** 2 + sig ** 2))
 
-    def resid(p):
+    def resid(p: Any) -> Any:
         return (model_w(p) - ws) / (ws + w_floor)
 
     try:

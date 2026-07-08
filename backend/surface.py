@@ -7,6 +7,11 @@ in the live chain rather than in a smoothed fit.
 import math
 import os
 import sys
+from datetime import date
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:
+    from backend.data.models import OptionChain
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -16,7 +21,7 @@ from pricing_engine import bs_price  # noqa: E402
 from backend import svi
 
 
-def _by_expiration(chain):
+def _by_expiration(chain: "OptionChain") -> Dict[date, Dict[float, Tuple[float, float]]]:
     """Group contracts with usable IV by expiration -> {exp: {strike: (iv, T)}}."""
     groups = {}
     for c in chain.contracts:
@@ -27,11 +32,11 @@ def _by_expiration(chain):
     return groups
 
 
-def _tenor(slot):
+def _tenor(slot: Dict[float, Tuple[float, float]]) -> float:
     return next(iter(slot.values()))[1]
 
 
-def _interp(points, x):
+def _interp(points: Sequence[Tuple[float, float]], x: float) -> Optional[float]:
     """Linear-interpolate y at x from sorted (x, y) points; None if out of range."""
     if not points or x < points[0][0] or x > points[-1][0]:
         return None
@@ -43,7 +48,7 @@ def _interp(points, x):
     return points[-1][1]
 
 
-def svi_surface(chain, forwards):
+def svi_surface(chain: "OptionChain", forwards: Dict[date, float]) -> Dict[str, Any]:
     """
     Fit an SVI slice per expiration. Each slice is either fitted (with a smooth
     curve over its strike range) or marked ok=False, so the overlay hides the
@@ -77,7 +82,9 @@ def svi_surface(chain, forwards):
     return {"slices": slices}
 
 
-def arbitrage(chain, forwards, spot, rate_fn, dividend_yield):
+def arbitrage(chain: "OptionChain", forwards: Dict[date, float], spot: float,
+              rate_fn: Callable[[float], float],
+              dividend_yield: Optional[float]) -> Dict[str, Any]:
     """
     Scan the raw surface for calendar and butterfly arbitrage. Returns a list of
     violations, each with type, location, and a plain-language description.
@@ -152,7 +159,8 @@ def arbitrage(chain, forwards, spot, rate_fn, dividend_yield):
     }
 
 
-def atm_term_structure(chain, forwards, svi_result):
+def atm_term_structure(chain: "OptionChain", forwards: Dict[date, float],
+                       svi_result: Dict[str, Any]) -> Dict[str, Any]:
     """
     ATM implied vol (at the forward) per expiration, from the raw points and, where
     the slice calibrated, from the SVI fit for a smoother curve.

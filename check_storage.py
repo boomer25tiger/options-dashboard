@@ -36,7 +36,6 @@ def hr(title):
 
 def main():
     try:
-        # -- storage unit tests (synthetic, no network) -----------------
         hr("STORAGE LAYER (synthetic rows)")
         db.record_visit("testa", {"spot": 100.0, "atm_iv": 0.20, "rv_20": 0.18,
                                   "iv_rank": 40.0, "iv_percentile": 55.0},
@@ -77,7 +76,6 @@ def main():
         # persistence across a fresh connection (each call reconnects)
         check("persists across connections", len(db.list_visits("TESTB")) == 1)
 
-        # -- API routes -------------------------------------------------
         hr("HISTORY API (synthetic rows already stored)")
         r = client.get("/api/history/visits", params={"ticker": "TESTA"})
         check("GET /history/visits 200", r.status_code == 200
@@ -94,7 +92,6 @@ def main():
         check("GET /history/series bad metric -> 400", r.status_code == 400,
               f"status={r.status_code}")
 
-        # -- live visit recording for SPY -------------------------------
         hr("LIVE VISIT RECORD (SPY)")
         r = client.post("/api/history/record", json={"ticker": "SPY"})
         check("POST /history/record 200", r.status_code == 200, str(r.status_code))
@@ -115,7 +112,6 @@ def main():
             check("SPY atm_iv series has a point",
                   len(r3.json()["series"].get("SPY", [])) >= 1)
 
-        # -- summary ----------------------------------------------------
         hr("SUMMARY")
         print(f"  {len(_PASSES)} passed, {len(_FAILS)} failed")
         if _FAILS:

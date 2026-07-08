@@ -26,14 +26,12 @@ def hr(title):
 
 
 def main():
-    # -- health / market ------------------------------------------------
     hr("HEALTH + MARKET STATUS")
     r = client.get("/api/health")
     check("health 200 + ok", r.status_code == 200 and r.json().get("status") == "ok")
     r = client.get("/api/market-status")
     check("market-status 200", r.status_code == 200, f"is_open={r.json().get('is_open')}")
 
-    # -- assumptions ----------------------------------------------------
     hr("ASSUMPTIONS")
     r = client.get("/api/assumptions", params={"ticker": TICKER})
     j = r.json()
@@ -43,7 +41,6 @@ def main():
     check("dividend yield sane", 0 <= j.get("dividend", {}).get("value", -1) < 0.05,
           f"q={j.get('dividend',{}).get('value')}")
 
-    # -- expirations ----------------------------------------------------
     hr("EXPIRATIONS")
     r = client.get("/api/expirations", params={"ticker": TICKER})
     exps = r.json().get("expirations", [])
@@ -51,7 +48,6 @@ def main():
           f"{len(exps)} expirations")
     first_exp = exps[0] if exps else None
 
-    # -- chain ----------------------------------------------------------
     hr("CHAIN")
     r = client.get("/api/chain", params={"ticker": TICKER, "num_expirations": 3})
     j = r.json()
@@ -64,7 +60,6 @@ def main():
           f"{len(with_greeks)}/{len(contracts)}")
     check("iv_rank proxy present", j.get("iv_rank") is not None
           and "rank" in (j.get("iv_rank") or {}))
-    # vega should be in display units (per 1% vol -> far smaller than native)
     sample = next((c for c in with_greeks), None)
     if sample:
         v = sample["greeks"]["vega"]
@@ -74,7 +69,6 @@ def main():
     else:
         symbol = None
 
-    # -- contract detail ------------------------------------------------
     hr("CONTRACT DETAIL")
     if symbol:
         r = client.get("/api/contract", params={"ticker": TICKER, "symbol": symbol})
@@ -94,7 +88,6 @@ def main():
     else:
         check("contract detail (skipped, no sample symbol)", False)
 
-    # -- analysis: realized vs implied ----------------------------------
     hr("ANALYSIS: REALIZED VS IMPLIED")
     r = client.get("/api/analysis/realized-vs-implied", params={"ticker": TICKER})
     j = r.json()
@@ -104,7 +97,6 @@ def main():
           f"keys={list(rv.keys())}")
     check("atm_iv present", j.get("atm_iv") is not None, f"atm_iv={j.get('atm_iv')}")
 
-    # -- analysis: surface ----------------------------------------------
     hr("ANALYSIS: SURFACE")
     r = client.get("/api/analysis/surface", params={"ticker": TICKER, "max_expirations": 4})
     j = r.json()
@@ -114,7 +106,6 @@ def main():
     check("surface points well-formed",
           all({"strike", "tenor", "iv"} <= set(p) for p in pts[:5]))
 
-    # -- analysis: smile ------------------------------------------------
     hr("ANALYSIS: SMILE")
     if first_exp:
         r = client.get("/api/analysis/smile",
@@ -123,7 +114,6 @@ def main():
         check("smile 200 + points", r.status_code == 200 and len(j.get("points", [])) > 0,
               f"{len(j.get('points', []))} points at {first_exp}")
 
-    # -- strategy: bull call spread + single leg ------------------------
     hr("STRATEGY PRICING")
     if first_exp:
         # Fetch chain to pick two real strikes around spot.
@@ -163,7 +153,6 @@ def main():
         else:
             check("strategy pricing (no second strike found)", False)
 
-    # -- summary --------------------------------------------------------
     hr("SUMMARY")
     print(f"  {len(_PASSES)} passed, {len(_FAILS)} failed")
     if _FAILS:
