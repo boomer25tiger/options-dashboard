@@ -9,7 +9,7 @@ import sys
 
 from pricing_engine import bs_greeks, bs_price, prob_profit_long_option
 from backend.strategy import (
-    Leg, MarketContext, breakevens, leg_breakdown, max_profit_loss, net_cost,
+    Leg, MarketContext, leg_breakdown, net_cost,
     payoff_curve, position_greeks, prob_of_profit, summarize, time_to_expiry,
 )
 

@@ -730,8 +730,8 @@ def price_strategy(ticker, legs, iv_source="auto", dividend_override=None):
     if final_exp:
         labeled = _valuation_dates(now, final_exp)
         xs, curves = strategy.payoff_curve(legs, ctx, [d for _, d in labeled])
-        for (label, d), series_key in zip(labeled, [d for _, d in labeled]):
-            curves_payload[label] = curves[series_key]
+        for label, d in labeled:
+            curves_payload[label] = curves[d]
 
     summary_out = {
         "net_cost": summary["net_cost"],

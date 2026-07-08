@@ -6,7 +6,6 @@ Each check states its source and the expected number.
 from pricing_engine import (
     bs_price, bs_greeks, binomial_price, implied_vol,
     realized_vol, garman_klass_vol, prob_itm, breakeven_long_option,
-    prob_profit_long_option
 )
 
 def check(label, got, expected, tol):

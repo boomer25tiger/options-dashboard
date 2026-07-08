@@ -10,7 +10,6 @@ default, overridable with the HISTORY_DB_PATH environment variable so tests can 
 a throwaway file. Each call opens and closes its own connection, which keeps it safe
 under FastAPI's threadpool.
 """
-import datetime as dt
 import os
 import sqlite3
 from contextlib import closing

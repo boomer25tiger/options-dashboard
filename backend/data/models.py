@@ -34,7 +34,7 @@ class OptionContract:
     volume: Optional[int] = None
     open_interest: Optional[int] = None
     iv: Optional[float] = None
-    iv_source: Optional[str] = None        # 'alpaca' | 'yfinance' | 'backsolved'
+    iv_source: Optional[str] = None        # 'alpaca' | 'yfinance' | 'computed' | 'parity'
     greeks: Greeks = field(default_factory=Greeks)
     greeks_source: Optional[str] = None    # 'recomputed'
     time_to_expiry: Optional[float] = None  # years
