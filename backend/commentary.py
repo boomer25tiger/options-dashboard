@@ -321,3 +321,49 @@ def heston_contract_read(price, heston_iv, market_iv, fit_iv_rmse):
                    f"contract's own implied vol, so the market is pricing it above the "
                    f"fitted surface."),
     }
+
+
+def hedge_read(summary):
+    """
+    Reads a delta-hedging run in terms of the vol spread that drove it. A long
+    delta hedge is paid when the path moves more than the implied vol it hedged at;
+    a short keeps premium when the path moves less. Splits the result into its
+    gamma and theta halves.
+    """
+    if not summary:
+        return None
+    pnl = summary.get("total_pnl")
+    rv = summary.get("realized_vol")
+    iv = summary.get("implied_vol")
+    if pnl is None or rv is None or iv is None:
+        return None
+
+    long_side = summary.get("position", 1) >= 0
+    rv_pct, iv_pct = rv * 100, iv * 100
+    above = rv > iv
+    money = f"${abs(pnl):,.0f}"
+    verb = "earned" if pnl >= 0 else "lost"
+
+    if long_side:
+        headline = f"Delta-hedged long {verb} {money}"
+        driver = (f"Realized {rv_pct:.1f}% ran {'above' if above else 'below'} the "
+                  f"{iv_pct:.1f}% implied it hedged at, and a long delta hedge is paid "
+                  f"when the path moves more than priced.")
+    else:
+        headline = f"Delta-hedged short {verb} {money}"
+        driver = (f"Realized {rv_pct:.1f}% ran {'above' if above else 'below'} the "
+                  f"{iv_pct:.1f}% implied it sold at, and a short delta hedge keeps "
+                  f"premium when the path moves less than priced.")
+
+    gamma = summary.get("gamma_pnl_total")
+    theta = summary.get("theta_pnl_total")
+    g_word = (f"a gamma gain of {_money(gamma)}" if (gamma or 0) >= 0
+              else f"a gamma cost of {_money(gamma)}")
+    t_word = (f"a theta gain of {_money(theta)}" if (theta or 0) >= 0
+              else f"a theta bleed of {_money(theta)}")
+    detail = f"{driver} Over the window that split into {g_word} and {t_word}."
+    return {
+        "headline": headline,
+        "detail": detail,
+        "note": "Hedged daily at the implied vol shown, held constant over the window.",
+    }

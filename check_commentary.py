@@ -8,8 +8,8 @@ Run:  python3 check_commentary.py
 import sys
 
 from backend.commentary import (
-    contract_read, heston_contract_read, realized_implied_read, strategy_read,
-    term_structure_read,
+    contract_read, hedge_read, heston_contract_read, realized_implied_read,
+    strategy_read, term_structure_read,
 )
 
 _PASSES, _FAILS = [], []
@@ -230,6 +230,29 @@ check("market vol below the Heston fit screens cheap",
 
 check("missing Heston price returns None", heston_contract_read(None, 0.15, 0.15, 0.01) is None)
 check("missing market iv returns None", heston_contract_read(5.0, 0.15, None, 0.01) is None)
+
+
+hr("Hedge read: vol spread and the gamma-theta split")
+
+long_win = hedge_read({"total_pnl": 409.0, "realized_vol": 0.151, "implied_vol": 0.119,
+                       "position": 1, "gamma_pnl_total": 1266.0, "theta_pnl_total": -1040.0})
+check("long hedge that profited reads as earned",
+      long_win["headline"] == "Delta-hedged long earned $409"
+      and "ran above" in long_win["detail"], long_win["detail"])
+check("long split shows gamma gain and theta bleed",
+      "gamma gain of $1,266" in long_win["detail"] and "theta bleed of $1,040" in long_win["detail"])
+
+short_win = hedge_read({"total_pnl": 916.0, "realized_vol": 0.151, "implied_vol": 0.20,
+                        "position": -1, "gamma_pnl_total": -827.0, "theta_pnl_total": 1806.0})
+check("short hedge that profited reads as earned",
+      short_win["headline"] == "Delta-hedged short earned $916"
+      and "ran below" in short_win["detail"], short_win["detail"])
+check("short split shows gamma cost and theta gain",
+      "gamma cost of $827" in short_win["detail"] and "theta gain of $1,806" in short_win["detail"])
+
+check("missing summary returns None", hedge_read(None) is None)
+check("missing realized vol returns None",
+      hedge_read({"total_pnl": 1, "implied_vol": 0.2, "position": 1}) is None)
 
 
 hr("RESULT")

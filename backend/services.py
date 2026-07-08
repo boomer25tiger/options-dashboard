@@ -24,7 +24,7 @@ from heston import heston_price  # noqa: E402
 from backend.data import alpaca, dividends, normalize, rates, yfinance_client
 from backend.data.alpaca import AlpacaError
 from backend.data.yfinance_client import YFinanceError
-from backend import analytics, commentary, heston_calib, strategy
+from backend import analytics, commentary, hedging, heston_calib, strategy
 from backend import surface as surface_mod
 from backend.storage import db
 
@@ -317,6 +317,50 @@ def realized_vs_implied(ticker):
         "cone": cone,
         "read": read,
     }
+
+
+def _atm_iv_1m(ticker):
+    """ATM implied vol of the expiration nearest one month out, or None."""
+    all_dates, all_strs = nearest_expiration_dates(ticker, 12)
+    today = dt.date.today()
+    idx = min(range(len(all_dates)),
+              key=lambda i: abs((all_dates[i] - today).days - 28))
+    chain, _, _, _ = _load_chain(ticker, [all_strs[idx]], [all_dates[idx]], "auto",
+                                 None, strike_band=0.3)
+    return analytics.atm_iv(chain)
+
+
+def hedge_simulation(ticker, lookback=30, implied_vol=None, option_type="call",
+                     position=1, moneyness=1.0):
+    """Delta-hedge one option over the last `lookback` trading days of the path."""
+    bars = _load_bars(ticker)
+    if len(bars) < lookback + 2:
+        raise DataUnavailable(f"insufficient price history for {ticker}")
+    window = bars[-(lookback + 1):]
+    closes = [b["c"] for b in window]
+    dates = [str(b.get("t", ""))[:10] for b in window]
+
+    if implied_vol is None:
+        implied_vol = _atm_iv_1m(ticker) or hedging.realized_vol(closes)
+    if not implied_vol or implied_vol <= 0:
+        raise DataUnavailable("no implied vol available to hedge at")
+
+    T = lookback / 252
+    rate_fn, rate_source, _, rate_asof = rates.get_rate_curve()
+    r = rate_fn(T)
+    q, _ = dividends.resolve_dividend_yield(ticker, None)
+
+    result = hedging.simulate(closes, implied_vol, r, q, option_type, position, moneyness)
+    if result is None:
+        raise DataUnavailable("could not simulate the hedge over this window")
+    for step, date in zip(result["steps"], dates):
+        step["date"] = date
+    result["ticker"] = ticker
+    result["as_of"] = dates[-1]
+    result["rate_used"] = r
+    result["dividend_yield"] = q
+    result["read"] = commentary.hedge_read(result["summary"])
+    return result
 
 
 def surface(ticker, max_expirations=8, iv_source="auto"):

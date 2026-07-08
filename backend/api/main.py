@@ -114,6 +114,17 @@ def heston(ticker: str):
     return _guard(services.heston_calibration, ticker)
 
 
+@app.get("/api/analysis/hedge")
+def hedge(ticker: str,
+          lookback: int = Query(30, ge=5, le=120),
+          implied_vol: float | None = None,
+          option_type: str = "call",
+          position: int = Query(1, ge=-1, le=1),
+          moneyness: float = Query(1.0, ge=0.7, le=1.3)):
+    return _guard(services.hedge_simulation, ticker, lookback, implied_vol,
+                  option_type, position, moneyness)
+
+
 @app.get("/api/contract/heston")
 def contract_heston(ticker: str, symbol: str):
     return _guard(services.contract_heston, ticker, symbol)
