@@ -98,6 +98,11 @@ def realized_vs_implied(ticker: str):
     return _guard(services.realized_vs_implied, ticker)
 
 
+@app.get("/api/analysis/realized-history")
+def realized_history(ticker: str, horizon: int = Query(21, ge=5, le=63)):
+    return _guard(services.realized_history, ticker, horizon)
+
+
 @app.get("/api/analysis/surface")
 def surface(ticker: str, max_expirations: int = Query(8, ge=2, le=20),
             iv_source: str = "auto"):

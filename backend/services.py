@@ -319,6 +319,65 @@ def realized_vs_implied(ticker):
     }
 
 
+def realized_history(ticker, horizon=21):
+    """
+    Two views of implied against realized over time.
+
+    Forward-realized (from stock bars, immediately available): the realized vol that
+    materialized over the `horizon` trading days after each past date across the last
+    year, so the current implied can be judged against what realized has actually
+    delivered (the empirical volatility-risk premium).
+
+    Recorded spread (from stored visits, grows over time): the implied-minus-realized
+    spread recorded on each past visit, so today's premium sits in its own history.
+    """
+    bars = _load_bars(ticker)
+    closes = [b["c"] for b in bars]
+    dates = [str(b.get("t", ""))[:10] for b in bars]
+    if len(closes) < horizon + 40:
+        raise DataUnavailable(f"insufficient price history for {ticker}")
+
+    logret = [math.log(closes[k] / closes[k - 1]) for k in range(1, len(closes))
+              if closes[k] > 0 and closes[k - 1] > 0]
+    fwd = []
+    for i in range(len(logret) - horizon + 1):
+        w = logret[i:i + horizon]
+        mean = sum(w) / len(w)
+        var = sum((x - mean) ** 2 for x in w) / (len(w) - 1)
+        fwd.append({"date": dates[i], "value": math.sqrt(var * 252)})
+    fwd = fwd[-252:]
+    fwd_vals = sorted(p["value"] for p in fwd)
+
+    current_implied = _atm_iv_1m(ticker)
+    fwd_median = fwd_vals[len(fwd_vals) // 2] if fwd_vals else None
+    above_share = (sum(1 for v in fwd_vals if v <= current_implied) / len(fwd_vals)
+                   if (current_implied and fwd_vals) else None)
+    premium = (current_implied - fwd_median) if (current_implied and fwd_median) else None
+
+    visits = list(reversed(db.list_visits(ticker, limit=2000)))
+    recorded = [{"date": v["timestamp"][:10], "implied": v["atm_iv"],
+                 "realized": v["rv_20"], "vrp": v["atm_iv"] - v["rv_20"]}
+                for v in visits if v.get("atm_iv") and v.get("rv_20")]
+    vrp_vals = sorted(r["vrp"] for r in recorded)
+    current_vrp = recorded[-1]["vrp"] if recorded else None
+    vrp_percentile = (sum(1 for v in vrp_vals if v <= current_vrp) / len(vrp_vals)
+                      if (current_vrp is not None and len(vrp_vals) >= 4) else None)
+
+    return {
+        "ticker": ticker, "horizon_days": horizon, "current_implied": current_implied,
+        "forward_realized": {
+            "series": fwd, "median": fwd_median,
+            "implied_above_share": above_share, "premium_to_median": premium,
+        },
+        "recorded": {
+            "series": recorded, "n_visits": len(recorded),
+            "current_vrp": current_vrp, "vrp_percentile": vrp_percentile,
+        },
+        "read": commentary.realized_history_read(current_implied, fwd_median,
+                                                 above_share, premium, horizon),
+    }
+
+
 def _atm_iv_1m(ticker):
     """ATM implied vol of the expiration nearest one month out, or None."""
     all_dates, all_strs = nearest_expiration_dates(ticker, 12)

@@ -9,7 +9,7 @@ import sys
 
 from backend.commentary import (
     contract_read, exotic_read, hedge_read, heston_contract_read, montecarlo_read,
-    realized_implied_read, strategy_read, term_structure_read,
+    realized_history_read, realized_implied_read, strategy_read, term_structure_read,
 )
 
 _PASSES, _FAILS = [], []
@@ -280,6 +280,25 @@ ki = exotic_read("barrier", "call", 7.10, 16.22, knock_probability=0.112,
 check("knock-in barrier reads as worth only the touching paths",
       "knock in" in ki["detail"] and "11%" in ki["detail"])
 check("missing exotic price returns None", exotic_read("asian", "call", None, 10.0) is None)
+
+
+hr("Realized-history read: empirical volatility-risk premium")
+
+rich = realized_history_read(0.144, 0.118, 0.81, 0.026, 21)
+check("implied above most forward-realized reads as overpricing",
+      rich["headline"] == "Implied has tended to overprice subsequent realized", rich["detail"])
+check("rich detail carries the numbers",
+      "14.4%" in rich["detail"] and "11.8%" in rich["detail"]
+      and "above 81%" in rich["detail"] and "+2.6 points" in rich["detail"])
+
+cheap = realized_history_read(0.10, 0.15, 0.25, -0.05, 21)
+check("implied below most forward-realized reads as underpricing",
+      cheap["headline"] == "Implied has tended to underprice subsequent realized")
+mid = realized_history_read(0.13, 0.128, 0.5, 0.002, 21)
+check("implied near the middle reads as roughly tracking",
+      mid["headline"] == "Implied roughly tracks subsequent realized")
+
+check("missing forward median returns None", realized_history_read(0.14, None, 0.8, 0.02, 21) is None)
 
 
 hr("RESULT")

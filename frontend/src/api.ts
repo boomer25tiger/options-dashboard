@@ -187,6 +187,25 @@ export interface RealizedVsImplied {
   read: { lean: 'rich' | 'cheap' | 'neutral'; headline: string; detail: string; assumption: string } | null
 }
 
+export interface RealizedHistory {
+  ticker: string
+  horizon_days: number
+  current_implied: number | null
+  forward_realized: {
+    series: { date: string; value: number }[]
+    median: number | null
+    implied_above_share: number | null
+    premium_to_median: number | null
+  }
+  recorded: {
+    series: { date: string; implied: number; realized: number; vrp: number }[]
+    n_visits: number
+    current_vrp: number | null
+    vrp_percentile: number | null
+  }
+  read: { headline: string; detail: string; note: string } | null
+}
+
 export interface ExpirationsResponse { ticker: string; expirations: string[] }
 
 export interface ContractDetail {
@@ -308,6 +327,8 @@ export const api = {
     }),
   realizedVsImplied: (ticker: string) =>
     get<RealizedVsImplied>('analysis/realized-vs-implied', { ticker }),
+  realizedHistory: (ticker: string) =>
+    get<RealizedHistory>('analysis/realized-history', { ticker }),
   contract: (ticker: string, symbol: string, ivSource: string) =>
     get<ContractDetail>('contract', { ticker, symbol, iv_source: ivSource }),
   strategyPrice: (ticker: string, legs: StrategyLegInput[], ivSource: string) =>

@@ -841,6 +841,9 @@ function RealizedTab({ ticker, themeKey }: { ticker: string; themeKey: string })
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['rvi', ticker], queryFn: () => api.realizedVsImplied(ticker),
   })
+  const rh = useQuery({
+    queryKey: ['realized-history', ticker], queryFn: () => api.realizedHistory(ticker),
+  })
   const c = plotColors()
 
   if (isLoading) return <Loading label={`Loading realized vs implied for ${ticker}…`} />
@@ -917,6 +920,37 @@ function RealizedTab({ ticker, themeKey }: { ticker: string; themeKey: string })
     yaxis: { ...baseLayout().yaxis, title: { text: 'Garman-Klass vol %' }, rangemode: 'tozero' },
   }
 
+  // Forward-realized vs implied (empirical vol-risk premium) and the recorded spread.
+  const h = rh.data
+  const fr = h?.forward_realized
+  const frData = fr?.series?.length ? [
+    { type: 'scatter', mode: 'lines', name: `${h!.horizon_days}d forward realized`,
+      x: fr.series.map((p) => p.date), y: fr.series.map((p) => p.value * 100),
+      line: { color: c.muted, width: 1.5 }, hovertemplate: '%{x}<br>%{y:.1f}%<extra></extra>' },
+  ] : []
+  const frLayout = {
+    ...baseLayout(), height: 300, showlegend: true,
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.1, yanchor: 'bottom', bgcolor: 'rgba(0,0,0,0)', font: { color: c.muted, size: 11 } },
+    margin: { l: 52, r: 18, t: 28, b: 34 },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'Annualized %' } },
+    shapes: h?.current_implied != null ? [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: h.current_implied * 100, y1: h.current_implied * 100, line: { color: c.accent, dash: 'dash', width: 1.5 } }] : [],
+    annotations: h?.current_implied != null ? [{ xref: 'paper', x: 0.99, y: h.current_implied * 100, text: `1-month implied ${(h.current_implied * 100).toFixed(1)}%`, showarrow: false, font: { color: c.accent, size: 10 }, yanchor: 'bottom', xanchor: 'right' }] : [],
+  }
+  const rec = h?.recorded
+  // Only chart once visits span several distinct days; same-day points would stack.
+  const recEnough = new Set((rec?.series ?? []).map((p) => p.date)).size >= 4
+  const recData = recEnough ? [
+    { type: 'scatter', mode: 'lines+markers', name: 'recorded VRP',
+      x: rec!.series.map((p) => p.date), y: rec!.series.map((p) => p.vrp * 100),
+      line: { color: c.accent, width: 2 }, marker: { size: 6, color: c.accent },
+      hovertemplate: '%{x}<br>%{y:.1f} pts<extra></extra>' },
+  ] : []
+  const recLayout = {
+    ...baseLayout(), height: 260, showlegend: false, margin: { l: 52, r: 18, t: 16, b: 34 },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'Implied − realized (pts)' } },
+    shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 0, y1: 0, line: { color: c.grid, width: 1 } }],
+  }
+
   return (
     <div>
       <div className="stat-row">
@@ -967,6 +1001,48 @@ function RealizedTab({ ticker, themeKey }: { ticker: string; themeKey: string })
           Percentile bands of realized volatility at each window over the past year, with today's values overlaid. Shows whether current realized is high or low by the name's own history.
         </div>
       </div>
+
+      {fr?.series?.length ? (
+        <div className="chart-card" style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+            <strong style={{ fontSize: 13 }}>Forward realized vs implied</strong>
+            <span className="dim" style={{ fontSize: 12 }}>the empirical volatility-risk premium over the past year</span>
+          </div>
+          <Plot key={themeKey + 'fr'} data={frData} layout={frLayout} config={plotConfig}
+            style={{ width: '100%', height: 300 }} useResizeHandler />
+          {h?.read && (
+            <div className="verdict" style={{ marginTop: 8, marginBottom: 4 }}>
+              <b>{h.read.headline}.</b> {h.read.detail} <span className="dim">{h.read.note}</span>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {h ? (
+        <div className="chart-card" style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+            <strong style={{ fontSize: 13 }}>Recorded spread history</strong>
+            <span className="dim" style={{ fontSize: 12 }}>
+              {recEnough
+                ? `implied minus realized on ${rec!.n_visits} recorded visits${rec!.vrp_percentile != null ? `, today in the ${(rec!.vrp_percentile * 100).toFixed(0)}th percentile` : ''}`
+                : `builds as you record visits (${rec?.n_visits ?? 0} so far)`}
+            </span>
+          </div>
+          {recEnough ? (
+            <>
+              <Plot key={themeKey + 'rec'} data={recData} layout={recLayout} config={plotConfig}
+                style={{ width: '100%', height: 260 }} useResizeHandler />
+              <div className="chart-note">
+                The volatility risk premium recorded on each visit, so today's premium sits in the context of your own recorded history.
+              </div>
+            </>
+          ) : (
+            <div className="note">
+              This chart fills in as you open the Chain page over days and weeks. Each visit records the ATM implied and realized vol, which accumulate into a spread history here.
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -412,3 +412,33 @@ def exotic_read(kind, option_type, price, vanilla, knock_probability=None,
         detail = (f"The {barrier_type} {option_type} prices ${price:.2f} against the ${vanilla:.2f} "
                   f"vanilla, worth only the {kp} of paths that reach the barrier and knock in.")
     return {"headline": headline, "detail": detail}
+
+
+def realized_history_read(current_implied, fwd_median, above_share, premium, horizon):
+    """
+    Empirical vol-risk premium: how the current implied compares with the realized
+    vol that actually followed over the past year, and how often it sat above it.
+    """
+    if current_implied is None or fwd_median is None or above_share is None:
+        return None
+    imp, med = current_implied * 100, fwd_median * 100
+    prem = (premium or 0.0) * 100
+    share = above_share * 100
+    if above_share >= 0.6 and (premium or 0) > 0.005:
+        headline = "Implied has tended to overprice subsequent realized"
+        lean = "options screen rich against what realized has actually delivered"
+    elif above_share <= 0.4:
+        headline = "Implied has tended to underprice subsequent realized"
+        lean = "options screen cheap against what realized has actually delivered"
+    else:
+        headline = "Implied roughly tracks subsequent realized"
+        lean = "no strong empirical premium either way"
+    detail = (f"Current one-month implied is {imp:.1f}%. Over the past year, the {horizon}-day "
+              f"realized that followed averaged {med:.1f}%, and today's implied sits above "
+              f"{share:.0f}% of those outcomes, an empirical premium of {prem:+.1f} points. So "
+              f"{lean}.")
+    return {
+        "headline": headline,
+        "detail": detail,
+        "note": f"Forward realized is the vol that materialized over the {horizon} trading days after each past date.",
+    }
