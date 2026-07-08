@@ -1,0 +1,122 @@
+"""
+Monte Carlo option pricer.
+
+Simulation-based pricing under risk-neutral geometric Brownian motion, added beside
+the closed-form (Black-Scholes), tree (binomial), and stochastic-vol (Heston)
+methods. On a vanilla European the four agree, which is the point of showing it. It
+also prices path-dependent options the closed forms cannot: arithmetic and geometric
+Asians (payoff on the average price) and knock-in / knock-out barriers.
+
+NumPy-vectorized, since the method is inherently array work and NumPy is already a
+dependency (and the next planned extension is engine vectorization). Each price
+carries its standard error and a 95% confidence interval, and antithetic variates
+tighten the estimate. A fixed default seed keeps a displayed price reproducible.
+"""
+import math
+
+import numpy as np
+
+
+def _terminal(S, T, r, sigma, q, z):
+    return S * np.exp((r - q - 0.5 * sigma * sigma) * T + sigma * math.sqrt(T) * z)
+
+
+def _payoff(s, K, option_type):
+    return np.maximum(s - K, 0.0) if option_type == "call" else np.maximum(K - s, 0.0)
+
+
+def _summary(disc_payoff):
+    price = float(disc_payoff.mean())
+    stderr = float(disc_payoff.std(ddof=1) / math.sqrt(len(disc_payoff)))
+    return {"price": price, "stderr": stderr,
+            "ci_low": price - 1.96 * stderr, "ci_high": price + 1.96 * stderr,
+            "n_paths": int(len(disc_payoff))}
+
+
+def price_european(S, K, T, r, sigma, option_type="call", q=0.0,
+                   n_paths=200_000, seed=12345, antithetic=True):
+    """Vanilla European by terminal-value simulation (no time-stepping needed)."""
+    otype = option_type.lower()
+    if T <= 0 or sigma <= 0:
+        intrinsic = max(0.0, (S - K) if otype == "call" else (K - S))
+        return {"price": intrinsic, "stderr": 0.0, "ci_low": intrinsic,
+                "ci_high": intrinsic, "n_paths": 0}
+    rng = np.random.default_rng(seed)
+    n = n_paths // 2 if antithetic else n_paths
+    z = rng.standard_normal(n)
+    if antithetic:
+        z = np.concatenate([z, -z])
+    st = _terminal(S, T, r, sigma, q, z)
+    return _summary(math.exp(-r * T) * _payoff(st, K, otype))
+
+
+def european_convergence(S, K, T, r, sigma, option_type="call", q=0.0,
+                         checkpoints=(1000, 5000, 25000, 100000, 400000), seed=12345):
+    """Running price and 95% band at increasing path counts, to show convergence."""
+    otype = option_type.lower()
+    if T <= 0 or sigma <= 0:
+        return []
+    rng = np.random.default_rng(seed)
+    n_max = max(checkpoints)
+    st = _terminal(S, T, r, sigma, q, rng.standard_normal(n_max))
+    dp = math.exp(-r * T) * _payoff(st, K, otype)
+    out = []
+    for n in checkpoints:
+        sub = dp[:n]
+        price = float(sub.mean())
+        se = float(sub.std(ddof=1) / math.sqrt(n))
+        out.append({"n_paths": int(n), "price": price,
+                    "ci_low": price - 1.96 * se, "ci_high": price + 1.96 * se})
+    return out
+
+
+def _paths(S, T, r, sigma, q, n_paths, n_steps, seed, antithetic=True):
+    """Simulated GBM paths, shape (paths, n_steps+1), first column S."""
+    rng = np.random.default_rng(seed)
+    n = n_paths // 2 if antithetic else n_paths
+    dt = T / n_steps
+    z = rng.standard_normal((n, n_steps))
+    if antithetic:
+        z = np.concatenate([z, -z], axis=0)
+    incr = (r - q - 0.5 * sigma * sigma) * dt + sigma * math.sqrt(dt) * z
+    log_path = np.cumsum(incr, axis=1)
+    body = S * np.exp(log_path)
+    head = np.full((body.shape[0], 1), float(S))
+    return np.concatenate([head, body], axis=1)
+
+
+def price_asian(S, K, T, r, sigma, option_type="call", q=0.0, average="arithmetic",
+                n_paths=100_000, n_steps=50, seed=12345):
+    """Asian option on the average of the monitored path (open excluded)."""
+    otype = option_type.lower()
+    if T <= 0 or sigma <= 0 or n_steps < 1:
+        return None
+    paths = _paths(S, T, r, sigma, q, n_paths, n_steps, seed)
+    monitored = paths[:, 1:]
+    if average == "geometric":
+        avg = np.exp(np.log(monitored).mean(axis=1))
+    else:
+        avg = monitored.mean(axis=1)
+    return _summary(math.exp(-r * T) * _payoff(avg, K, otype))
+
+
+def price_barrier(S, K, T, r, sigma, barrier, barrier_type="up-and-out",
+                  option_type="call", q=0.0, n_paths=100_000, n_steps=100, seed=12345):
+    """
+    Barrier option, monitored at each step. barrier_type is one of
+    up-and-out, up-and-in, down-and-out, down-and-in.
+    """
+    otype = option_type.lower()
+    bt = barrier_type.lower()
+    if T <= 0 or sigma <= 0 or n_steps < 1 or barrier <= 0:
+        return None
+    paths = _paths(S, T, r, sigma, q, n_paths, n_steps, seed)
+    if bt.startswith("up"):
+        breached = paths.max(axis=1) >= barrier
+    else:
+        breached = paths.min(axis=1) <= barrier
+    alive = breached if bt.endswith("in") else ~breached
+    payoff = _payoff(paths[:, -1], K, otype) * alive
+    result = _summary(math.exp(-r * T) * payoff)
+    result["knock_probability"] = float(breached.mean())
+    return result
