@@ -1,7 +1,7 @@
 """
 Normalize Alpaca and yfinance option data into one contract schema, back-solve
-missing IV from the mid price, and recompute Greeks against the CURRENT clock so
-time decay stays accurate over closed periods (the CLAUDE.md design rationale).
+missing IV from the mid price, and recompute Greeks against the current clock so
+time decay stays accurate over closed periods.
 
 The IV-source policy:
   'alpaca'   -> use only Alpaca contracts; back-solve IV where Alpaca lacks it.

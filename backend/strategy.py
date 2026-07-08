@@ -8,8 +8,7 @@ profit / max loss with unbounded detection, and probability of profit under the
 lognormal model. The engine stays the single source of truth for all pricing.
 
 Repricing uses Black-Scholes (European), matching the analytical-Greeks display
-default in CLAUDE.md. The Contract page shows the binomial American price
-separately.
+default. The Contract page shows the binomial American price separately.
 
 Conventions:
   quantity   : signed; positive = long, negative = short. Contracts for options,
@@ -310,7 +309,7 @@ def leg_breakdown(legs, ctx):
             "strike": leg.strike,
             "expiration": leg.expiration.isoformat() if leg.expiration else None,
             "sigma": leg.sigma, "price": entry, "cost": scale * entry,
-            "greeks": {  # display units, per CLAUDE.md (vega/100, theta/365, rho/100)
+            "greeks": {  # display units (vega/100, theta/365, rho/100)
                 "delta": g["delta"], "gamma": g["gamma"],
                 "vega": g["vega"] / 100.0, "theta": g["theta"] / 365.0,
                 "rho": g["rho"] / 100.0,

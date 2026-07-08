@@ -1,7 +1,6 @@
 """
-Phase 1 verification: exercise the data layer against live SPY and print the
-values, with a handful of correctness assertions. Nothing here builds the API or
-UI. Secrets are never printed.
+Exercise the data layer against live SPY and print the values, with a handful of
+correctness assertions. Secrets are never printed.
 
 Run:  python3 check_data_layer.py
 """

@@ -1,5 +1,5 @@
 """
-Phase 4 verification: SQLite history storage and the History API routes.
+Verify the SQLite history storage and the History API routes.
 
 Uses a throwaway database (HISTORY_DB_PATH set to a temp file before any backend
 import), so the real history.db is never touched. Storage logic is checked with

@@ -2,9 +2,9 @@
 FRED client for the US Treasury constant-maturity par yield curve.
 
 Pulls the dense daily curve (1-month through 30-year) from FRED's keyless CSV
-endpoint, one series per request. This is END-OF-DAY data, published once per
+endpoint, one series per request. This is end-of-day data, published once per
 business day, so it is the accurate dense source for rho but does not move
-intraday (see the rates note in CLAUDE.md). The caller caches it.
+intraday. The caller caches it.
 """
 import csv
 import datetime as dt

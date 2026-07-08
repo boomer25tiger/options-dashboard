@@ -52,7 +52,7 @@ def _cached(key, ttl, producer):
 
 
 # ----------------------------------------------------------------------
-# Greek / contract serialization (display units per CLAUDE.md)
+# Greek / contract serialization (display units)
 # ----------------------------------------------------------------------
 GREEKS_UNITS = {
     "delta": "per $1 spot", "gamma": "per $1 spot",

@@ -1,10 +1,9 @@
 """
 Analytics derived from stock bars and the normalized chain.
 
-Realized-vol windows, the realized-vol RANK proxy (the day-one stand-in for IV
-rank / percentile per CLAUDE.md feature 6, until the stored history accumulates a
-real IV series), the at-the-money implied vol, and point extraction for the
-volatility surface and smile.
+Realized-vol windows, the realized-vol rank proxy (a stand-in for IV rank /
+percentile until the stored history accumulates a real IV series), the at-the-money
+implied vol, and point extraction for the volatility surface and smile.
 """
 import os
 import sys

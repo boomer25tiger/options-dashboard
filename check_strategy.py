@@ -1,6 +1,6 @@
 """
-Phase 2 verification: the multi-leg strategy math against known analytic results.
-No network needed; everything is checked on a synthetic market context.
+Check the multi-leg strategy math against known analytic results. No network is
+needed; everything runs on a synthetic market context.
 
 Run:  python3 check_strategy.py
 """

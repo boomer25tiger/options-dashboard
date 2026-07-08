@@ -6,10 +6,9 @@ Checks two independent data paths from THIS machine, without building anything:
   1. Alpaca options-chain SNAPSHOT for SPY, authenticated with the .env keys.
   2. yfinance option-chain for SPY, including implied volatility.
 
-For each, it reports what came back and specifically whether Greeks and IV are
-present. The market is closed today (holiday), so per CLAUDE.md the Alpaca
-snapshot is expected to carry a latestQuote but NO Greeks / NO IV, while
-yfinance is expected to still supply IV. This script confirms or refutes that.
+For each, it reports what came back and whether Greeks and IV are present. When the
+market is closed the Alpaca snapshot may carry a latestQuote with no Greeks or IV,
+while yfinance still supplies IV. This script confirms or refutes that.
 
 Secrets are never printed. The key ID is masked; the secret is never shown.
 Run:  python3 test_connectivity.py

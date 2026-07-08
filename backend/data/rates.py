@@ -4,7 +4,7 @@ Risk-free rate curve, expiry-matched by interpolation.
 Source priority: FRED's dense constant-maturity par curve (1-month to 30-year,
 end-of-day, the accurate dense source for rho), then Yahoo's four intraday-ish
 points as a fallback, then a flat single rate. The resolved curve is cached for a
-few hours because the end-of-day data does not change intraday. Matches CLAUDE.md.
+few hours because the end-of-day data does not change intraday.
 """
 import time
 

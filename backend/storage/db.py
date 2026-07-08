@@ -1,9 +1,9 @@
 """
-SQLite storage for examined-stock history (CLAUDE.md feature 10).
+SQLite storage for examined-stock history.
 
-Records KEY METRICS PER VISIT (spot, ATM IV, realized-vol windows, the rank proxy,
-timestamp), not the full chain. Capturing the ATM IV per visit also seeds the real
-IV series over time, which becomes true IV rank once enough visits accumulate (F6).
+Records key metrics per visit (spot, ATM IV, realized-vol windows, the rank proxy,
+timestamp), not the full chain. Capturing the ATM IV per visit also seeds a real IV
+series over time, which becomes a true IV rank once enough visits accumulate.
 
 The database file is git-ignored (*.db). Its path is the project-root history.db by
 default, overridable with the HISTORY_DB_PATH environment variable so tests can use

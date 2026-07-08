@@ -1,10 +1,9 @@
 """
 Alpaca data client: option snapshots, stock bars, and OCC symbol parsing.
 
-Confirmed working against the user's paper account in test_connectivity.py. After
-hours the free `indicative` feed still returns Greeks/IV for many contracts,
-though frozen at the last session (see CLAUDE.md). Every call raises AlpacaError
-with a short, non-sensitive message on failure.
+After hours the free `indicative` feed still returns Greeks/IV for many contracts,
+though frozen at the last session. Every call raises AlpacaError with a short,
+non-sensitive message on failure.
 """
 import datetime as dt
 

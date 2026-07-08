@@ -1,7 +1,7 @@
 """
-Per-ticker dividend yield with a user override. Displayed and overridable per
-CLAUDE.md. Trailing yield is acceptable for indices like SPY and can misstate
-forward yield for irregular payers, so both the value and its source are surfaced.
+Per-ticker dividend yield with a user override, both displayed and overridable.
+Trailing yield is acceptable for indices like SPY and can misstate forward yield
+for irregular payers, so both the value and its source are surfaced.
 """
 from backend.data.yfinance_client import YFinanceError, get_dividend_yield
 

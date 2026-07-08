@@ -1,7 +1,7 @@
 """
-Phase 3 verification: exercise every API route in-process with the FastAPI
-TestClient (no separate server). The service layer makes real calls to Alpaca /
-yfinance / FRED, so this checks the API end to end against live SPY data.
+Exercise every API route in-process with the FastAPI TestClient (no separate
+server). The service layer makes real calls to Alpaca / yfinance / FRED, so this
+checks the API end to end against live SPY data.
 
 Run:  python3 check_api.py
 """

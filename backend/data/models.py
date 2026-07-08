@@ -1,10 +1,9 @@
 """
-Normalized data structures shared across the data layer and (later) the API.
+Normalized data structures shared across the data layer and the API.
 
-Greeks are stored in ENGINE-NATIVE units: vega per 1.00 change in vol, theta per
+Greeks are stored in engine-native units: vega per 1.00 change in vol, theta per
 year, rho per 1.00 change in rate. Display conversions (per 1% point, per day)
-happen at the presentation layer, per CLAUDE.md, so the raw numbers have one
-source of truth.
+happen at the presentation layer, so the raw numbers have one source of truth.
 """
 from dataclasses import dataclass, field
 from datetime import date, datetime
