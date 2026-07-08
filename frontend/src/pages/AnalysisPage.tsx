@@ -6,7 +6,7 @@ import { api, type HestonCalibration } from '../api'
 import { pct, money } from '../format'
 import { baseLayout, plotColors, ivColorscale, cssVar, plotConfig } from '../plotTheme'
 
-type Tab = 'surface' | 'smile' | 'realized'
+type Tab = 'surface' | 'smile' | 'realized' | 'hedge'
 
 // Linear interpolation of a sorted [strike, iv] smile onto an arbitrary strike.
 // This is the only interpolation used and it is structural: a 3D surface needs a
@@ -55,10 +55,12 @@ export default function AnalysisPage() {
         <button className={tab === 'surface' ? 'active' : ''} onClick={() => setTab('surface')}>Volatility Surface</button>
         <button className={tab === 'smile' ? 'active' : ''} onClick={() => setTab('smile')}>Volatility Smile</button>
         <button className={tab === 'realized' ? 'active' : ''} onClick={() => setTab('realized')}>Realized vs Implied</button>
+        <button className={tab === 'hedge' ? 'active' : ''} onClick={() => setTab('hedge')}>Delta Hedging</button>
       </div>
       {tab === 'surface' && <SurfaceTab ticker={ticker} ivSource={ivSource} themeKey={theme} />}
       {tab === 'smile' && <SmileTab ticker={ticker} ivSource={ivSource} themeKey={theme} />}
       {tab === 'realized' && <RealizedTab ticker={ticker} themeKey={theme} />}
+      {tab === 'hedge' && <HedgingTab ticker={ticker} themeKey={theme} />}
     </div>
   )
 }
@@ -68,6 +70,125 @@ function Loading({ label }: { label: string }) {
 }
 function Failed({ error }: { error: unknown }) {
   return <div className="msg err">Failed to load: {(error as Error).message}</div>
+}
+
+function HedgingTab({ ticker, themeKey }: { ticker: string; themeKey: string }) {
+  const [lookback, setLookback] = useState(30)
+  const [position, setPosition] = useState(1)
+  const [optionType, setOptionType] = useState<'call' | 'put'>('call')
+  const [ivPct, setIvPct] = useState('')
+  const c = plotColors()
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['hedge', ticker, lookback, position, optionType, ivPct],
+    queryFn: () => api.hedge(ticker, {
+      lookback, position, optionType,
+      impliedVol: ivPct.trim() ? Number(ivPct) / 100 : undefined,
+    }),
+  })
+
+  const inputStyle = { width: 92, padding: '5px 8px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 13, outline: 'none' }
+  const controls = (
+    <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+      <div>
+        <div className="lbl" style={{ marginBottom: 4 }}>Window</div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[20, 30, 60, 90].map((d) => <button key={d} className={`btn ${lookback === d ? 'accent' : ''}`} onClick={() => setLookback(d)}>{d}d</button>)}
+        </div>
+      </div>
+      <div>
+        <div className="lbl" style={{ marginBottom: 4 }}>Position</div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button className={`btn ${position === 1 ? 'accent' : ''}`} onClick={() => setPosition(1)}>Long</button>
+          <button className={`btn ${position === -1 ? 'accent' : ''}`} onClick={() => setPosition(-1)}>Short</button>
+        </div>
+      </div>
+      <div>
+        <div className="lbl" style={{ marginBottom: 4 }}>Option</div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button className={`btn ${optionType === 'call' ? 'accent' : ''}`} onClick={() => setOptionType('call')}>Call</button>
+          <button className={`btn ${optionType === 'put' ? 'accent' : ''}`} onClick={() => setOptionType('put')}>Put</button>
+        </div>
+      </div>
+      <div>
+        <div className="lbl" style={{ marginBottom: 4 }}>Implied vol %</div>
+        <input value={ivPct} onChange={(e) => setIvPct(e.target.value)} placeholder="1m ATM" style={inputStyle} />
+      </div>
+    </div>
+  )
+
+  if (isLoading) return <div>{controls}<Loading label={`Simulating the hedge for ${ticker}…`} /></div>
+  if (isError) return <div>{controls}<Failed error={error} /></div>
+  if (!data) return <div>{controls}</div>
+
+  const s = data.summary
+  const x = data.steps.map((st) => st.date)
+  const chartData = [
+    { type: 'scatter', mode: 'lines', name: 'Hedge P&L', x, y: data.steps.map((st) => st.cum_pnl),
+      line: { color: c.accent, width: 2 }, hovertemplate: '%{x}<br>P&L $%{y:.0f}<extra></extra>' },
+    { type: 'scatter', mode: 'lines', name: 'Underlying', x, y: data.steps.map((st) => st.spot), yaxis: 'y2',
+      line: { color: c.muted, width: 1.5, dash: 'dot' }, hovertemplate: '%{x}<br>spot %{y:.2f}<extra></extra>' },
+  ]
+  const layout = {
+    ...baseLayout(), height: 380, showlegend: true,
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12, yanchor: 'bottom', bgcolor: 'rgba(0,0,0,0)', font: { color: c.muted, size: 11 } },
+    margin: { l: 62, r: 56, t: 34, b: 40 },
+    xaxis: { ...baseLayout().xaxis },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'Cumulative P&L $' } },
+    yaxis2: { overlaying: 'y', side: 'right', title: { text: 'Underlying' }, gridcolor: 'rgba(0,0,0,0)', tickfont: { color: c.muted }, titlefont: { color: c.muted } },
+    shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 0, y1: 0, line: { color: c.grid, width: 1 } }],
+  }
+
+  const pnlClass = s.total_pnl >= 0 ? 'pos' : 'neg'
+  return (
+    <div>
+      {controls}
+      <div className="cards">
+        <div className="card hl">
+          <div className="lbl">Total hedge P&amp;L</div>
+          <div className={`big ${pnlClass}`}>{money(s.total_pnl)}</div>
+          <div className="sub">{s.days}d · {s.position >= 0 ? 'long' : 'short'} {s.option_type}</div>
+        </div>
+        <div className="card">
+          <div className="lbl">Implied · hedged at</div>
+          <div className="big">{pct(s.implied_vol)}</div>
+          <div className="sub">held constant</div>
+        </div>
+        <div className="card">
+          <div className="lbl">Realized · window</div>
+          <div className="big">{pct(s.realized_vol)}</div>
+          <div className="sub">{s.vol_spread != null ? `spread ${(s.vol_spread * 100).toFixed(1)} pts` : ''}</div>
+        </div>
+        <div className="card">
+          <div className="lbl">Entry premium</div>
+          <div className="big">{money(Math.abs(s.entry_premium))}</div>
+          <div className="sub">{s.position >= 0 ? 'paid' : 'received'}</div>
+        </div>
+      </div>
+
+      {data.read && (
+        <div className="verdict" style={{ marginBottom: 12 }}>
+          <b className={pnlClass}>{data.read.headline}.</b> {data.read.detail}
+          <span className="dim"> {data.read.note}</span>
+        </div>
+      )}
+
+      <div className="chart-card">
+        <Plot key={themeKey + 'hedge'} data={chartData} layout={layout} config={plotConfig}
+          style={{ width: '100%', height: 380 }} useResizeHandler />
+        <div className="chart-note">
+          Cumulative P&amp;L of delta-hedging the option day by day, with the underlying path dotted on the right axis. Each day's change is the gamma gain from realized movement net of the theta bleed.
+        </div>
+      </div>
+
+      <div className="section-h">Gamma-theta split</div>
+      <div className="kv-grid">
+        <div className="kv2"><span className="lbl">Gamma gain</span><span className={`v ${s.gamma_pnl_total >= 0 ? 'pos' : 'neg'}`}>{money(s.gamma_pnl_total)}</span></div>
+        <div className="kv2"><span className="lbl">Theta bleed</span><span className={`v ${s.theta_pnl_total >= 0 ? 'pos' : 'neg'}`}>{money(s.theta_pnl_total)}</span></div>
+        <div className="kv2"><span className="lbl">Strike</span><span className="v">{money(s.strike)}</span></div>
+      </div>
+    </div>
+  )
 }
 
 function HestonPanel({ calib, loading }: { calib?: HestonCalibration; loading: boolean }) {

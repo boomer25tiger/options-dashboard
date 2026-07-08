@@ -113,6 +113,24 @@ export interface ContractHeston {
   read: { headline: string; detail: string } | null
 }
 
+export interface HedgeStep {
+  i: number; date: string; spot: number; tau: number
+  option_value: number; delta: number; hedge_shares: number
+  cum_pnl: number; gamma_pnl: number; theta_pnl: number
+}
+export interface HedgeSummary {
+  total_pnl: number; entry_premium: number
+  implied_vol: number; realized_vol: number | null; vol_spread: number | null
+  gamma_pnl_total: number; theta_pnl_total: number
+  strike: number; position: number; option_type: string; days: number; multiplier: number
+}
+export interface HedgeResult {
+  ticker: string; as_of: string; rate_used: number; dividend_yield: number
+  steps: HedgeStep[]
+  summary: HedgeSummary
+  read: { headline: string; detail: string; note: string } | null
+}
+
 export interface SmilePoint {
   strike: number; iv: number; type: 'call' | 'put'; in_the_money: boolean | null
 }
@@ -251,6 +269,11 @@ export const api = {
   smile: (ticker: string, expiration: string, ivSource: string) =>
     get<SmileResponse>('analysis/smile', { ticker, expiration, iv_source: ivSource }),
   heston: (ticker: string) => get<HestonCalibration>('analysis/heston', { ticker }),
+  hedge: (ticker: string, opts: { lookback?: number; impliedVol?: number; optionType?: string; position?: number; moneyness?: number }) =>
+    get<HedgeResult>('analysis/hedge', {
+      ticker, lookback: opts.lookback, implied_vol: opts.impliedVol,
+      option_type: opts.optionType, position: opts.position, moneyness: opts.moneyness,
+    }),
   contractHeston: (ticker: string, symbol: string) =>
     get<ContractHeston>('contract/heston', { ticker, symbol }),
   realizedVsImplied: (ticker: string) =>
