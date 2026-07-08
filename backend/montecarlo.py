@@ -120,3 +120,28 @@ def price_barrier(S, K, T, r, sigma, barrier, barrier_type="up-and-out",
     result = _summary(math.exp(-r * T) * payoff)
     result["knock_probability"] = float(breached.mean())
     return result
+
+
+def sample_paths(S, T, r, sigma, q=0.0, n_paths=200, n_steps=80, seed=7,
+                 barrier=None, barrier_type=None):
+    """
+    A small sample of simulated paths for display, with the time axis in years and,
+    when a barrier is given, a per-path flag for whether it was breached. The full
+    price uses far more paths; this is just enough to show the cloud.
+    """
+    if T <= 0 or sigma <= 0 or n_steps < 1:
+        return None
+    paths = _paths(S, T, r, sigma, q, n_paths, n_steps, seed, antithetic=False)
+    times = [round(T * i / n_steps, 5) for i in range(n_steps + 1)]
+    breached = None
+    if barrier and barrier_type:
+        if barrier_type.lower().startswith("up"):
+            hit = paths.max(axis=1) >= barrier
+        else:
+            hit = paths.min(axis=1) <= barrier
+        breached = [bool(b) for b in hit]
+    return {
+        "times": times,
+        "paths": [[round(v, 3) for v in row] for row in paths.tolist()],
+        "breached": breached,
+    }

@@ -529,15 +529,20 @@ def montecarlo_exotic(ticker, kind="asian", option_type="call", days=60, moneyne
 
     vanilla_mc = montecarlo.price_european(spot, K, T, r, sigma, option_type, q)
     vanilla_bs = bs_price(spot, K, T, r, sigma, option_type, q)
+    barrier_level = spot * barrier_moneyness if kind == "barrier" else None
+    sample = montecarlo.sample_paths(spot, T, r, sigma, q, n_paths=200, n_steps=80,
+                                     barrier=barrier_level,
+                                     barrier_type=barrier_type if kind == "barrier" else None)
     return {
         "ok": True, "ticker": ticker, "kind": kind, "option_type": option_type,
         "spot": spot, "strike": K, "implied_vol": sigma, "days": days,
         "price": exotic["price"], "ci_low": exotic["ci_low"], "ci_high": exotic["ci_high"],
         "stderr": exotic["stderr"], "knock_probability": knock,
         "average": average if kind == "asian" else None,
-        "barrier": (spot * barrier_moneyness) if kind == "barrier" else None,
+        "barrier": barrier_level,
         "barrier_type": barrier_type if kind == "barrier" else None,
         "vanilla_bs": vanilla_bs, "vanilla_mc": vanilla_mc["price"],
+        "paths": sample,
         "read": commentary.exotic_read(kind, option_type, exotic["price"], vanilla_bs,
                                        knock, average, barrier_type),
     }

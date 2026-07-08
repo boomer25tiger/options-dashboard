@@ -131,6 +131,7 @@ export interface MonteCarloExotic {
   knock_probability: number | null
   average: string | null; barrier: number | null; barrier_type: string | null
   vanilla_bs: number; vanilla_mc: number
+  paths: { times: number[]; paths: number[][]; breached: boolean[] | null } | null
   read: { headline: string; detail: string } | null
 }
 

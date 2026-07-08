@@ -15,7 +15,7 @@ import math
 import sys
 
 from backend.montecarlo import (
-    european_convergence, price_asian, price_barrier, price_european,
+    european_convergence, price_asian, price_barrier, price_european, sample_paths,
 )
 from pricing_engine import bs_price
 
@@ -104,6 +104,22 @@ check("expired option returns intrinsic",
 check("Asian with no steps returns None", price_asian(S, K, T, r, sigma, n_steps=0) is None)
 check("barrier with non-positive level returns None",
       price_barrier(S, K, T, r, sigma, 0.0, "up-and-out") is None)
+
+
+hr("Sample paths for the visualization")
+sp = sample_paths(100.0, 1.0, 0.03, 0.20, 0.0, n_paths=50, n_steps=40,
+                  barrier=130.0, barrier_type="up-and-out")
+check("returns the requested number of paths", len(sp["paths"]) == 50)
+check("each path has n_steps+1 points", len(sp["paths"][0]) == 41 and len(sp["times"]) == 41)
+check("every path starts at spot", all(abs(row[0] - 100.0) < 1e-6 for row in sp["paths"]))
+check("breach flags are present with a barrier",
+      sp["breached"] is not None and len(sp["breached"]) == 50)
+check("breach flags align with reaching the barrier",
+      all((max(row) >= 129.5) if sp["breached"][i] else (max(row) <= 130.5)
+          for i, row in enumerate(sp["paths"])))
+sp_plain = sample_paths(100.0, 1.0, 0.03, 0.20, n_paths=10, n_steps=20)
+check("no barrier means no breach flags", sp_plain["breached"] is None)
+check("degenerate inputs return None", sample_paths(100.0, 0.0, 0.03, 0.20) is None)
 
 
 hr("RESULT")

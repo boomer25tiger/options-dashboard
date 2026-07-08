@@ -129,15 +129,40 @@ function MonteCarloTab({ ticker, themeKey }: { ticker: string; themeKey: string 
   if (!data) return <div>{controls}</div>
 
   const d = data
-  const barData = [
-    { type: 'bar', x: ['Exotic', 'Vanilla'], y: [d.price, d.vanilla_bs], width: [0.5, 0.5],
-      marker: { color: [c.accent, c.muted] },
-      error_y: { type: 'data', array: [(d.ci_high - d.ci_low) / 2, 0], visible: true, color: c.text, thickness: 1 },
-      hovertemplate: '%{x}: $%{y:.2f}<extra></extra>' },
+  const sim = d.paths
+  const buildPaths = (idxs: number[]) => {
+    const xs: (number | null)[] = [], ys: (number | null)[] = []
+    if (!sim) return { xs, ys }
+    const xd = sim.times.map((t) => t * 365)
+    for (const i of idxs) {
+      const row = sim.paths[i]
+      for (let j = 0; j < xd.length; j++) { xs.push(xd[j]); ys.push(row[j]) }
+      xs.push(null); ys.push(null)
+    }
+    return { xs, ys }
+  }
+  const allIdx = sim ? sim.paths.map((_, i) => i) : []
+  const breached = sim?.breached ?? null
+  const outIdx = breached ? allIdx.filter((i) => breached[i]) : []
+  const normalIdx = breached ? allIdx.filter((i) => !breached[i]) : allIdx
+  const normal = buildPaths(normalIdx)
+  const knocked = buildPaths(outIdx)
+  const pathData = [
+    { type: 'scatter', mode: 'lines', x: normal.xs, y: normal.ys, line: { color: c.muted, width: 0.6 }, opacity: 0.4, hoverinfo: 'skip', showlegend: false },
+    ...(outIdx.length ? [{ type: 'scatter', mode: 'lines', x: knocked.xs, y: knocked.ys, line: { color: c.neg, width: 0.7 }, opacity: 0.55, hoverinfo: 'skip', showlegend: false }] : []),
   ]
-  const barLayout = {
-    ...baseLayout(), height: 300, margin: { l: 58, r: 18, t: 18, b: 36 },
-    xaxis: { ...baseLayout().xaxis }, yaxis: { ...baseLayout().yaxis, title: { text: 'Price $' }, rangemode: 'tozero' },
+  const pathLayout = {
+    ...baseLayout(), height: 380, showlegend: false, margin: { l: 60, r: 18, t: 18, b: 40 },
+    xaxis: { ...baseLayout().xaxis, title: { text: 'Days into the option' } },
+    yaxis: { ...baseLayout().yaxis, title: { text: 'Underlying price' } },
+    shapes: [
+      { type: 'line', xref: 'paper', x0: 0, x1: 1, y0: d.strike, y1: d.strike, line: { color: c.text, dash: 'dash', width: 1.2 } },
+      ...(d.barrier != null ? [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: d.barrier, y1: d.barrier, line: { color: c.neg, dash: 'dot', width: 1.5 } }] : []),
+    ],
+    annotations: [
+      { xref: 'paper', x: 0.01, y: d.strike, text: `Strike ${money(d.strike)}`, showarrow: false, font: { color: c.text, size: 10 }, yanchor: 'bottom', xanchor: 'left' },
+      ...(d.barrier != null ? [{ xref: 'paper', x: 0.01, y: d.barrier, text: `Barrier ${money(d.barrier)}`, showarrow: false, font: { color: c.neg, size: 10 }, yanchor: 'bottom', xanchor: 'left' }] : []),
+    ],
   }
 
   return (
@@ -175,10 +200,12 @@ function MonteCarloTab({ ticker, themeKey }: { ticker: string; themeKey: string 
       )}
 
       <div className="chart-card">
-        <Plot key={themeKey + 'mcx'} data={barData} layout={barLayout} config={plotConfig}
-          style={{ width: '100%', height: 300 }} useResizeHandler />
+        <Plot key={themeKey + 'mcpaths'} data={pathData} layout={pathLayout} config={plotConfig}
+          style={{ width: '100%', height: 380 }} useResizeHandler />
         <div className="chart-note">
-          Simulated price of the path-dependent option against the vanilla on the same strike and maturity, under the same lognormal model. The error bar is the Monte Carlo 95% interval on the exotic.
+          {sim ? `${sim.paths.length} simulated price paths of the underlying over the option's life, a sample of the far larger set used to price it. The option is worth the average payoff across all such paths, discounted back to today.` : ''}
+          {d.kind === 'barrier' && outIdx.length > 0 ? ` The ${outIdx.length} red paths touch the barrier, and knocking them out or in is what pulls the price away from the vanilla.` : ''}
+          {d.kind === 'asian' ? " For an Asian the payoff is on each path's average level, not its endpoint, so the spread of averages is tighter than the terminal spread and the option costs less." : ''}
         </div>
       </div>
     </div>
