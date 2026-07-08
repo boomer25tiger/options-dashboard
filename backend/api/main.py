@@ -125,9 +125,28 @@ def hedge(ticker: str,
                   option_type, position, moneyness)
 
 
+@app.get("/api/analysis/montecarlo")
+def montecarlo(ticker: str,
+               kind: str = "asian",
+               option_type: str = "call",
+               days: int = Query(60, ge=5, le=730),
+               moneyness: float = Query(1.0, ge=0.7, le=1.3),
+               implied_vol: float | None = None,
+               average: str = "arithmetic",
+               barrier_moneyness: float = Query(1.1, ge=0.5, le=1.5),
+               barrier_type: str = "up-and-out"):
+    return _guard(services.montecarlo_exotic, ticker, kind, option_type, days,
+                  moneyness, implied_vol, average, barrier_moneyness, barrier_type)
+
+
 @app.get("/api/contract/heston")
 def contract_heston(ticker: str, symbol: str):
     return _guard(services.contract_heston, ticker, symbol)
+
+
+@app.get("/api/contract/montecarlo")
+def contract_montecarlo(ticker: str, symbol: str):
+    return _guard(services.contract_montecarlo, ticker, symbol)
 
 
 @app.post("/api/strategy/price")

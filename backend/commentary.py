@@ -367,3 +367,48 @@ def hedge_read(summary):
         "detail": detail,
         "note": "Hedged daily at the implied vol shown, held constant over the window.",
     }
+
+
+def montecarlo_read(price, ci_low, ci_high, bs):
+    """Whether the Monte Carlo interval agrees with the closed-form price."""
+    if price is None or bs is None:
+        return None
+    half = (ci_high - ci_low) / 2.0
+    if ci_low <= bs <= ci_high:
+        return {
+            "headline": "Agrees with the closed form",
+            "detail": (f"Monte Carlo prices it ${price:.2f} give or take ${half:.2f} at 95%, "
+                       f"and the ${bs:.2f} Black-Scholes value sits inside that band. The "
+                       f"simulation and the formula agree, as they should on a vanilla option."),
+        }
+    return {
+        "headline": "Interval misses the closed form",
+        "detail": (f"Monte Carlo prices it ${price:.2f} give or take ${half:.2f}, and the "
+                   f"${bs:.2f} Black-Scholes value falls outside. More paths would tighten "
+                   f"and re-centre the estimate."),
+    }
+
+
+def exotic_read(kind, option_type, price, vanilla, knock_probability=None,
+                average=None, barrier_type=None):
+    """Reads a path-dependent price against the vanilla on the same strike."""
+    if price is None or vanilla is None:
+        return None
+    cheaper = price < vanilla
+    if kind == "asian":
+        headline = "Asian prices below the vanilla" if cheaper else "Asian prices near the vanilla"
+        detail = (f"The {average} Asian {option_type} prices ${price:.2f} against the "
+                  f"${vanilla:.2f} vanilla. Averaging the path dampens the terminal move, so an "
+                  f"Asian normally costs less than the plain option on the same strike.")
+        return {"headline": headline, "detail": detail}
+
+    kp = f"{knock_probability * 100:.0f}%" if knock_probability is not None else "some"
+    knocks_out = bool(barrier_type) and barrier_type.endswith("out")
+    headline = "Barrier discounted from the vanilla" if cheaper else "Barrier near the vanilla"
+    if knocks_out:
+        detail = (f"The {barrier_type} {option_type} prices ${price:.2f} against the ${vanilla:.2f} "
+                  f"vanilla, discounted by the {kp} chance of touching the barrier and knocking out.")
+    else:
+        detail = (f"The {barrier_type} {option_type} prices ${price:.2f} against the ${vanilla:.2f} "
+                  f"vanilla, worth only the {kp} of paths that reach the barrier and knock in.")
+    return {"headline": headline, "detail": detail}

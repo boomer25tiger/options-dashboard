@@ -8,8 +8,8 @@ Run:  python3 check_commentary.py
 import sys
 
 from backend.commentary import (
-    contract_read, hedge_read, heston_contract_read, realized_implied_read,
-    strategy_read, term_structure_read,
+    contract_read, exotic_read, hedge_read, heston_contract_read, montecarlo_read,
+    realized_implied_read, strategy_read, term_structure_read,
 )
 
 _PASSES, _FAILS = [], []
@@ -253,6 +253,33 @@ check("short split shows gamma cost and theta gain",
 check("missing summary returns None", hedge_read(None) is None)
 check("missing realized vol returns None",
       hedge_read({"total_pnl": 1, "implied_vol": 0.2, "position": 1}) is None)
+
+
+hr("Monte Carlo reads")
+
+agree = montecarlo_read(12.45, 12.36, 12.53, 12.47)
+check("closed form inside the interval reads as agreement",
+      agree["headline"] == "Agrees with the closed form", agree["detail"])
+miss = montecarlo_read(12.45, 12.44, 12.46, 12.90)
+check("closed form outside the interval is flagged",
+      miss["headline"] == "Interval misses the closed form")
+check("missing Black-Scholes returns None", montecarlo_read(1.0, 0.9, 1.1, None) is None)
+
+asian = exotic_read("asian", "call", 9.36, 16.22, average="arithmetic")
+check("cheaper Asian reads below the vanilla",
+      asian["headline"] == "Asian prices below the vanilla"
+      and "Averaging the path" in asian["detail"], asian["detail"])
+
+ko = exotic_read("barrier", "call", 9.18, 16.22, knock_probability=0.112,
+                 barrier_type="up-and-out")
+check("knock-out barrier reads as discounted with its knock chance",
+      ko["headline"] == "Barrier discounted from the vanilla"
+      and "11% chance" in ko["detail"] and "knocking out" in ko["detail"], ko["detail"])
+ki = exotic_read("barrier", "call", 7.10, 16.22, knock_probability=0.112,
+                 barrier_type="up-and-in")
+check("knock-in barrier reads as worth only the touching paths",
+      "knock in" in ki["detail"] and "11%" in ki["detail"])
+check("missing exotic price returns None", exotic_read("asian", "call", None, 10.0) is None)
 
 
 hr("RESULT")

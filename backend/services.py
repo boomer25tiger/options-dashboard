@@ -24,7 +24,7 @@ from heston import heston_price  # noqa: E402
 from backend.data import alpaca, dividends, normalize, rates, yfinance_client
 from backend.data.alpaca import AlpacaError
 from backend.data.yfinance_client import YFinanceError
-from backend import analytics, commentary, hedging, heston_calib, strategy
+from backend import analytics, commentary, hedging, heston_calib, montecarlo, strategy
 from backend import surface as surface_mod
 from backend.storage import db
 
@@ -468,6 +468,78 @@ def contract_heston(ticker, symbol):
         "iv_rmse": calib.get("iv_rmse"), "feller_ok": calib.get("feller_ok"),
         "params": p,
         "read": commentary.heston_contract_read(price, heston_iv, sigma, calib.get("iv_rmse")),
+    }
+
+
+def contract_montecarlo(ticker, symbol):
+    """Monte Carlo vanilla price plus a convergence series for one contract."""
+    _, exp, otype, strike = alpaca.parse_occ_symbol(symbol)
+    chain, meta, _, _ = _load_chain(ticker, [exp.isoformat()], [exp], "auto", None,
+                                    strike_band=0.5)
+    match = next((c for c in chain.contracts if c.symbol == symbol), None)
+    if match is None:
+        match = next((c for c in chain.contracts
+                      if c.option_type == otype and abs(c.strike - strike) < 1e-6
+                      and c.expiration == exp), None)
+    if match is None:
+        raise NotFound(f"contract {symbol} not found in chain")
+
+    S, K, T, r, sigma = chain.spot, match.strike, match.time_to_expiry, match.rate_used, match.iv
+    q = meta["dividend"]["value"]
+    if not (S and T and T > 0 and sigma):
+        return {"ok": False, "reason": "contract not priceable", "price": None,
+                "convergence": [], "read": None}
+    mc = montecarlo.price_european(S, K, T, r, sigma, otype, q)
+    bs = bs_price(S, K, T, r, sigma, otype, q)
+    return {
+        "ok": True, "price": mc["price"], "ci_low": mc["ci_low"], "ci_high": mc["ci_high"],
+        "stderr": mc["stderr"], "n_paths": mc["n_paths"], "bs": bs,
+        "convergence": montecarlo.european_convergence(S, K, T, r, sigma, otype, q),
+        "read": commentary.montecarlo_read(mc["price"], mc["ci_low"], mc["ci_high"], bs),
+    }
+
+
+def montecarlo_exotic(ticker, kind="asian", option_type="call", days=60, moneyness=1.0,
+                      implied_vol=None, average="arithmetic", barrier_moneyness=1.1,
+                      barrier_type="up-and-out"):
+    """Price a path-dependent option on the underlying, with the vanilla for contrast."""
+    spot = yfinance_client.get_spot(ticker)
+    if not spot:
+        raise DataUnavailable(f"no spot price for {ticker}")
+    sigma = implied_vol if implied_vol else _atm_iv_1m(ticker)
+    if not sigma or sigma <= 0:
+        raise DataUnavailable("no implied vol available for the exotic")
+    T = days / 365.0
+    rate_fn, *_ = rates.get_rate_curve()
+    r = rate_fn(T)
+    q, _ = dividends.resolve_dividend_yield(ticker, None)
+    K = spot * moneyness
+
+    knock = None
+    if kind == "barrier":
+        barrier = spot * barrier_moneyness
+        exotic = montecarlo.price_barrier(spot, K, T, r, sigma, barrier, barrier_type,
+                                          option_type, q)
+        knock = exotic.get("knock_probability") if exotic else None
+    else:
+        kind = "asian"
+        exotic = montecarlo.price_asian(spot, K, T, r, sigma, option_type, q, average=average)
+    if exotic is None:
+        raise DataUnavailable("could not price the exotic over these inputs")
+
+    vanilla_mc = montecarlo.price_european(spot, K, T, r, sigma, option_type, q)
+    vanilla_bs = bs_price(spot, K, T, r, sigma, option_type, q)
+    return {
+        "ok": True, "ticker": ticker, "kind": kind, "option_type": option_type,
+        "spot": spot, "strike": K, "implied_vol": sigma, "days": days,
+        "price": exotic["price"], "ci_low": exotic["ci_low"], "ci_high": exotic["ci_high"],
+        "stderr": exotic["stderr"], "knock_probability": knock,
+        "average": average if kind == "asian" else None,
+        "barrier": (spot * barrier_moneyness) if kind == "barrier" else None,
+        "barrier_type": barrier_type if kind == "barrier" else None,
+        "vanilla_bs": vanilla_bs, "vanilla_mc": vanilla_mc["price"],
+        "read": commentary.exotic_read(kind, option_type, exotic["price"], vanilla_bs,
+                                       knock, average, barrier_type),
     }
 
 
