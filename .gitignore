@@ -20,6 +20,3 @@ build/
 
 # OS
 .DS_Store
-
-# Local editor / Claude Code settings
-.claude/
